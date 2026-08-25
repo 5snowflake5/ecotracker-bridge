@@ -1,16 +1,15 @@
-FROM python:3.12-slim-bookworm
+FROM ghcr.io/home-assistant/base:3.22.1
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    py3-zeroconf
 
 COPY bridge.py /app/bridge.py
 
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Berlin
+
 CMD ["python3", "-u", "/app/bridge.py"]
