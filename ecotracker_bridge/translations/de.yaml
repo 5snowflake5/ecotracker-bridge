@@ -4,7 +4,7 @@ configuration:
     description: IP oder URL des physischen EcoTrackers, ohne /v1/json
   poll_seconds:
     name: Poll-Intervall
-    description: Sekunden zwischen zwei Abfragen des physischen Zählers
+    description: Sekunden zwischen zwei Abfragen des physischen Zählers (1–60)
   port:
     name: HTTP-Port
     description: Growatt NOAH erwartet 80
