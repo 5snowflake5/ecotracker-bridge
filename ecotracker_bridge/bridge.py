@@ -26,7 +26,7 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 LOG = logging.getLogger("ecotracker-bridge")
 

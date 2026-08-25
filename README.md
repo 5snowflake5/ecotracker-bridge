@@ -14,12 +14,17 @@ physischer EcoTracker  ←live─  Bridge /v1/json  ←alle ~3s─  Growatt NOAH
 Nur `/v1/json` (NOAH) oder der Idle-Watchdog (>5 s ohne Trigger) rufen die Hardware.
 `/v1/cache` und die Statusseite lesen nur den Speicher.
 
-## App (Growatt)
+## Installation über GitHub
 
-1. Apps → Repository `https://github.com/5snowflake5/ecotracker-bridge`
-2. **EcoTracker Bridge** installieren, uni-meter stoppen
-3. `source_url` = `http://192.168.55.140`
-4. ShinePhone → `ecotracker-b43a45a1b2c3`
+1. Einstellungen → Apps → App installieren → ⋮ → Repositories  
+2. `https://github.com/5snowflake5/ecotracker-bridge`  
+3. **EcoTracker Bridge** installieren  
+
+Ab **1.2.1** kommen vorgebaute Images von GHCR (kein Docker-Build auf dem Pi).  
+Das verhindert Supervisor-Crashes / OOM auf Raspberry Pi 3.
+
+Wenn der Store hängt: App deinstallieren, Store einmal neu laden, neu installieren.  
+Währenddessen HA/Supervisor nicht neu starten.
 
 ## Sensoren über die App (MQTT)
 
