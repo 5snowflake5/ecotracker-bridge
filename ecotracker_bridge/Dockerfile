@@ -5,7 +5,8 @@ WORKDIR /app
 RUN apk add --no-cache \
     python3 \
     py3-pip \
-    py3-zeroconf
+    py3-zeroconf \
+    py3-paho-mqtt
 
 COPY bridge.py /app/bridge.py
 
