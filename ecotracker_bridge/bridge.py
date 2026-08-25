@@ -3,7 +3,8 @@
 
 Serves EcoTracker JSON on port 80 + mDNS `_everhome._tcp`.
 Physical meter is fetched on demand when a client (Growatt) hits `/v1/json`.
-Optional background poll via poll_seconds > 0.
+Optional background poll: if no client has triggered /v1/json for idle_fetch_seconds,
+the bridge fetches the physical EcoTracker itself so HA cache stays fresh.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
@@ -68,16 +69,25 @@ def try_load_options() -> dict[str, Any] | None:
     return None
 
 
-def parse_poll_seconds(raw: Any, fallback: float = 0.0) -> float:
-    """0 = kein Hintergrund-Poll (Growatt triggert über GET /v1/json)."""
+def parse_idle_seconds(raw: Any, fallback: float = 5.0) -> float:
+    """Sekunden ohne Trigger, bevor die Bridge selbst den physischen Tracker holt. 0 = aus."""
     try:
         value = float(raw)
     except (TypeError, ValueError):
-        LOG.error("Ungültiges poll_seconds=%r → Fallback %.0f", raw, fallback)
+        LOG.error("Ungültiges idle_fetch_seconds=%r → Fallback %.0f", raw, fallback)
         return fallback
     if value < 0:
         return 0.0
     return value
+
+
+def resolve_idle_seconds(opts: dict[str, Any], fallback: float = 5.0) -> float:
+    if "idle_fetch_seconds" in opts:
+        return parse_idle_seconds(opts.get("idle_fetch_seconds"), fallback)
+    # Kompatibilität zu älteren Optionen (poll_seconds).
+    if "poll_seconds" in opts:
+        return parse_idle_seconds(opts.get("poll_seconds"), fallback)
+    return fallback
 
 
 def apply_runtime_options(opts: dict[str, Any]) -> None:
@@ -92,10 +102,10 @@ def apply_runtime_options(opts: dict[str, Any]) -> None:
     if source and source != META.get("source_url"):
         LOG.info("source_url geändert: %s → %s", META.get("source_url"), source)
         META["source_url"] = source
-    poll = parse_poll_seconds(opts.get("poll_seconds", META.get("poll_seconds", 0)), 0.0)
-    if poll != META.get("poll_seconds"):
-        LOG.info("poll_seconds geändert: %s → %.0f", META.get("poll_seconds"), poll)
-        META["poll_seconds"] = poll
+    idle = resolve_idle_seconds(opts, float(META.get("idle_fetch_seconds", 5) or 5))
+    if idle != META.get("idle_fetch_seconds"):
+        LOG.info("idle_fetch_seconds geändert: %s → %.0f", META.get("idle_fetch_seconds"), idle)
+        META["idle_fetch_seconds"] = idle
 
 
 def load_options() -> dict[str, Any]:
@@ -251,21 +261,35 @@ def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
 
 
 def poll_loop() -> None:
-    """Optionaler Hintergrund-Poll. Bei poll_seconds=0 nur Options neu laden."""
-    n = 0
+    """Idle-Watchdog: holt selbst, wenn länger kein /v1/json-Trigger kam."""
+    last_attempt = 0.0
     while True:
         opts = try_load_options()
         if opts is not None:
             apply_runtime_options(opts)
-        interval = float(META.get("poll_seconds") or 0)
+        idle = float(META.get("idle_fetch_seconds") or 0)
         url = str(META.get("source_url") or "")
-        if interval <= 0 or not url:
-            time.sleep(5)
+        if idle <= 0 or not url:
+            time.sleep(1)
             continue
-        n += 1
-        fetch_source(url, reason=f"hintergrund #{n}")
-        LOG.debug("Hintergrund: warte %.0f s", interval)
-        time.sleep(interval)
+
+        snap = STATE.snapshot()
+        if snap["last_ok"] is None:
+            age = float("inf")
+        else:
+            age = max(0.0, (berlin_now() - snap["last_ok"]).total_seconds())
+
+        now = time.monotonic()
+        # Nur triggern, wenn Cache älter als idle UND seit letztem Versuch mind. idle.
+        if age >= idle and (now - last_attempt) >= idle:
+            last_attempt = now
+            LOG.debug(
+                "Idle-Watchdog: kein frischer Trigger seit %.1f s (≥ %.0f s) → selbst holen",
+                age if age != float("inf") else -1,
+                idle,
+            )
+            fetch_source(url, reason=f"idle-watchdog (age≥{idle:.0f}s)")
+        time.sleep(0.5)
 
 
 def html_status(snap: dict[str, Any]) -> bytes:
@@ -274,8 +298,8 @@ def html_status(snap: dict[str, Any]) -> bytes:
     last_ok_s = last_ok.strftime("%d.%m.%Y %H:%M:%S") if last_ok else "noch keine Daten"
     err = snap["last_error"] or "—"
     power = payload.get("power") if payload else "—"
-    poll = META.get("poll_seconds", 0)
-    poll_txt = "aus (nur on-demand via GET /v1/json)" if not poll else f"{poll:.0f} s"
+    idle = META.get("idle_fetch_seconds", 5)
+    idle_txt = "aus" if not idle else f"nach {idle:.0f} s ohne NOAH-Trigger"
     rows = ""
     if payload:
         for key, value in payload.items():
@@ -307,7 +331,7 @@ def html_status(snap: dict[str, Any]) -> bytes:
     <tr><th>Letzter erfolgreicher Abruf</th><td>{last_ok_s}</td></tr>
     <tr><th>Letzter Fehler</th><td>{err}</td></tr>
     <tr><th>Abrufe ok / fehl</th><td>{snap["polls_ok"]} / {snap["polls_fail"]}</td></tr>
-    <tr><th>Hintergrund-Poll</th><td>{poll_txt}</td></tr>
+    <tr><th>Idle-Fetch</th><td>{idle_txt}</td></tr>
     <tr><th>Log-Level</th><td>{META.get("log_level", "info")}</td></tr>
     <tr><th>Quelle</th><td><code>{META["source_url"]}</code></td></tr>
     <tr><th>mDNS</th><td><code>{META["hostname"]}._everhome._tcp.local</code></td></tr>
@@ -459,7 +483,7 @@ def main() -> None:
     serial = str(opts.get("serial", "293d45273261"))
     productid = str(opts.get("productid", "1137"))
     port = int(opts.get("port", 80))
-    poll_seconds = parse_poll_seconds(opts.get("poll_seconds", 0), 0.0)
+    idle_fetch_seconds = resolve_idle_seconds(opts, 5.0)
     log_level = str(opts.get("log_level", "info")).lower()
     if log_level not in ("info", "debug"):
         log_level = "info"
@@ -475,7 +499,7 @@ def main() -> None:
             "port": port,
             "serial": serial,
             "productid": productid,
-            "poll_seconds": poll_seconds,
+            "idle_fetch_seconds": idle_fetch_seconds,
             "log_level": log_level,
             "version": VERSION,
         }
@@ -484,10 +508,13 @@ def main() -> None:
     LOG.info("Quelle:        %s", source)
     LOG.info("HTTP-Listen:   0.0.0.0:%s", port)
     LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
-    if poll_seconds > 0:
-        LOG.info("Hintergrund-Poll: alle %.0f s (optional)", poll_seconds)
+    if idle_fetch_seconds > 0:
+        LOG.info(
+            "Idle-Fetch:    nach %.0f s ohne /v1/json-Trigger (NOAH ~3 s → meist unnötig)",
+            idle_fetch_seconds,
+        )
     else:
-        LOG.info("Hintergrund-Poll: aus (Growatt/Clients lösen Live-Fetch über GET /v1/json aus)")
+        LOG.info("Idle-Fetch:    aus")
     LOG.info("Log-Level:     %s", log_level.upper())
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
 

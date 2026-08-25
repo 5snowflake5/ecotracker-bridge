@@ -1,24 +1,17 @@
-# EcoTracker Bridge
-
-Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen EcoTracker aus, damit der Growatt NOAH ihn lokal koppeln kann.
-
-## Konfiguration
+# Konfiguration
 
 | Option | Bedeutung |
 |--------|-----------|
-| `source_url` | IP/URL des physischen EcoTrackers, z. B. `http://192.168.55.140` |
-| `poll_seconds` | Hintergrund-Poll. **0 = aus** (empfohlen). Growatt holt live über `GET /v1/json`. |
-| `log_level` | `info` (ruhig) oder `debug` (jeder GET inkl. Δ-Intervall) |
+| `source_url` | Physischer EcoTracker, z. B. `http://192.168.55.140` |
+| `idle_fetch_seconds` | Selbst holen, wenn so lange kein `/v1/json`-Trigger (NOAH). **5** Default. `0` = aus. Bei NOAH alle ~3 s praktisch nie nötig. |
+| `log_level` | `info` (ruhig) oder `debug` (jeder GET inkl. Δ und Latenz) |
 | `port` | HTTP-Port, Growatt erwartet **80** |
-| `mac` | Feste 12-stellige Hex-MAC für den Hostnamen `ecotracker-<mac>` |
-| `serial` / `productid` | mDNS-TXT (Default wie uni-meter, `productid=1137`) |
-| `announce_ip` | Leer lassen für Auto-Erkennung |
+| `mac` | Feste Hex-MAC für `ecotracker-<mac>` |
+| `serial` / `productid` | mDNS-TXT (`productid=1137`) |
+| `announce_ip` | Leer = Auto |
 
-## Nach dem Start
+## Endpunkte
 
-1. uni-meter **stoppen** (Port 80 und mDNS kollidieren sonst).
-2. Status: `http://<pi-ip>/`
-3. JSON: `http://<pi-ip>/v1/json`
-4. ShinePhone: NOAH → Zähler suchen → `ecotracker-b43a45a1b2c3`
-
-Pi, EcoTracker und NOAH müssen im selben Layer-2-Netz sein.
+- `/v1/json` — live (NOAH)
+- `/v1/cache` — Cache für HA-Sensoren, ohne Hardware-Call
+- `/` — Statusseite (Cache)

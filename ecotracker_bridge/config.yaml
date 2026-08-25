@@ -1,5 +1,5 @@
 name: EcoTracker Bridge
-version: "1.1.0"
+version: "1.1.1"
 slug: ecotracker_bridge
 description: >-
   Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen
@@ -14,7 +14,7 @@ boot: auto
 host_network: true
 options:
   source_url: "http://192.168.55.140"
-  poll_seconds: 0
+  idle_fetch_seconds: 5
   log_level: info
   port: 80
   mac: "B43A45A1B2C3"
@@ -23,7 +23,7 @@ options:
   announce_ip: ""
 schema:
   source_url: str
-  poll_seconds: int(0,60)
+  idle_fetch_seconds: int(0,60)
   log_level: list(info|debug)
   port: port
   mac: str
