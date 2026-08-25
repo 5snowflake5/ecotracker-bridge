@@ -110,43 +110,52 @@ class MeterState:
 
 STATE = MeterState()
 META: dict[str, Any] = {}
+FETCH_HEADERS = {"Accept": "application/json", "User-Agent": "ecotracker-bridge/1.0"}
+
+
+def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any] | None:
+    """Holt frisch vom physischen EcoTracker und aktualisiert den Cache."""
+    try:
+        req = Request(url, headers=FETCH_HEADERS, method="GET")
+        with urlopen(req, timeout=2.5) as resp:
+            body = resp.read()
+        data = json.loads(body)
+        if not isinstance(data, dict):
+            raise ValueError("Antwort ist kein JSON-Objekt")
+        raw = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        with STATE.lock:
+            STATE.payload = data
+            STATE.raw = raw
+            STATE.last_ok = berlin_now()
+            STATE.last_error = None
+            STATE.polls_ok += 1
+            ok_count = STATE.polls_ok
+        if log_ok:
+            LOG.info(
+                "Quelle ok (%s) #%s: power=%s W (avg=%s)",
+                reason,
+                ok_count,
+                data.get("power"),
+                data.get("powerAvg"),
+            )
+        return data
+    except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        with STATE.lock:
+            STATE.last_error = str(exc)
+            STATE.polls_fail += 1
+            fail_count = STATE.polls_fail
+        LOG.error("Quelle fehlgeschlagen (%s) #%s: %s", reason, fail_count, exc)
+        return None
 
 
 def poll_loop(url: str, interval: float) -> None:
-    headers = {"Accept": "application/json", "User-Agent": "ecotracker-bridge/1.0"}
-    # Bei kurzen Intervallen nicht jede Sekunde spammen; Fehler immer loggen.
+    # Hintergrund nur für Statusseite / Warmhalten; NOAH triggert live über /v1/json.
     log_every = max(1, int(30 / max(interval, 1)))
-    LOG.info("Poll gestartet: %s alle %.0f s", url, interval)
+    LOG.info("Hintergrund-Poll: %s alle %.0f s", url, interval)
+    n = 0
     while True:
-        try:
-            req = Request(url, headers=headers, method="GET")
-            with urlopen(req, timeout=2.5) as resp:
-                body = resp.read()
-            data = json.loads(body)
-            if not isinstance(data, dict):
-                raise ValueError("Antwort ist kein JSON-Objekt")
-            raw = json.dumps(data, separators=(",", ":")).encode("utf-8")
-            with STATE.lock:
-                STATE.payload = data
-                STATE.raw = raw
-                STATE.last_ok = berlin_now()
-                STATE.last_error = None
-                STATE.polls_ok += 1
-                ok_count = STATE.polls_ok
-            power = data.get("power")
-            if ok_count == 1 or ok_count % log_every == 0:
-                LOG.info(
-                    "Poll ok #%s: power=%s W (avg=%s)",
-                    ok_count,
-                    power,
-                    data.get("powerAvg"),
-                )
-        except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-            with STATE.lock:
-                STATE.last_error = str(exc)
-                STATE.polls_fail += 1
-                fail_count = STATE.polls_fail
-            LOG.error("Poll fehlgeschlagen #%s: %s", fail_count, exc)
+        n += 1
+        fetch_source(url, reason="hintergrund", log_ok=(n == 1 or n % log_every == 0))
         time.sleep(interval)
 
 
@@ -223,10 +232,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
         client = self._client()
-        snap = STATE.snapshot()
         if path in ("/v1/json", "/v1/json/"):
+            source = META.get("source_url")
+            if source:
+                # Jeder Abruf vom NOAH → frischer Call zum physischen EcoTracker.
+                fetch_source(source, reason=f"GET /v1/json von {client}", log_ok=True)
+            snap = STATE.snapshot()
             if snap["raw"] is None:
-                LOG.warning("GET /v1/json von %s → 503 (noch keine Daten)", client)
+                LOG.warning("GET /v1/json von %s → 503 (keine Daten vom physischen EcoTracker)", client)
                 msg = json.dumps({"error": "noch keine Daten vom physischen EcoTracker"}).encode()
                 self._send(503, msg, "application/json; charset=utf-8")
                 return
@@ -234,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
             LOG.info("GET /v1/json von %s → 200 power=%s W", client, power)
             self._send(200, snap["raw"], "application/json")
             return
+        snap = STATE.snapshot()
         if path in ("/", "/index.html"):
             LOG.info("GET / von %s → 200 Statusseite", client)
             self._send(200, html_status(snap), "text/html; charset=utf-8")
