@@ -8,8 +8,10 @@ port 80, and announces `_everhome._tcp` via mDNS so ShinePhone can pair.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
+import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -20,8 +22,26 @@ from urllib.request import Request, urlopen
 
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
-BERLIN = timezone(timedelta(hours=2))  # display only; refreshed via tm
+BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
+
+LOG = logging.getLogger("ecotracker-bridge")
+
+
+def setup_logging() -> None:
+    """Stdout = App-Log im Home Assistant Supervisor."""
+    root = logging.getLogger()
+    root.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    logging.getLogger("zeroconf").setLevel(logging.WARNING)
 
 
 def berlin_now() -> datetime:
@@ -37,7 +57,9 @@ def load_options() -> dict[str, Any]:
     for path in OPTIONS_PATHS:
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as fh:
-                return json.load(fh)
+                data = json.load(fh)
+            LOG.info("Konfiguration geladen aus %s", path)
+            return data
     raise SystemExit(f"Keine Optionsdatei gefunden ({', '.join(OPTIONS_PATHS)})")
 
 
@@ -92,6 +114,9 @@ META: dict[str, Any] = {}
 
 def poll_loop(url: str, interval: float) -> None:
     headers = {"Accept": "application/json", "User-Agent": "ecotracker-bridge/1.0"}
+    # Bei kurzen Intervallen nicht jede Sekunde spammen; Fehler immer loggen.
+    log_every = max(1, int(30 / max(interval, 1)))
+    LOG.info("Poll gestartet: %s alle %.0f s", url, interval)
     while True:
         try:
             req = Request(url, headers=headers, method="GET")
@@ -107,11 +132,21 @@ def poll_loop(url: str, interval: float) -> None:
                 STATE.last_ok = berlin_now()
                 STATE.last_error = None
                 STATE.polls_ok += 1
+                ok_count = STATE.polls_ok
+            power = data.get("power")
+            if ok_count == 1 or ok_count % log_every == 0:
+                LOG.info(
+                    "Poll ok #%s: power=%s W (avg=%s)",
+                    ok_count,
+                    power,
+                    data.get("powerAvg"),
+                )
         except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
             with STATE.lock:
                 STATE.last_error = str(exc)
                 STATE.polls_fail += 1
-            print(f"poll fail: {exc}", flush=True)
+                fail_count = STATE.polls_fail
+            LOG.error("Poll fehlgeschlagen #%s: %s", fail_count, exc)
         time.sleep(interval)
 
 
@@ -170,9 +205,11 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        if "/v1/json" in str(args[0] if args else ""):
-            return
-        print(f"http {args[0] if args else fmt}", flush=True)
+        # Standard-Access-Log unterdrücken; wir loggen gezielt in do_GET.
+        return
+
+    def _client(self) -> str:
+        return self.client_address[0] if self.client_address else "?"
 
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
@@ -185,17 +222,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
+        client = self._client()
         snap = STATE.snapshot()
         if path in ("/v1/json", "/v1/json/"):
             if snap["raw"] is None:
+                LOG.warning("GET /v1/json von %s → 503 (noch keine Daten)", client)
                 msg = json.dumps({"error": "noch keine Daten vom physischen EcoTracker"}).encode()
                 self._send(503, msg, "application/json; charset=utf-8")
                 return
+            power = (snap["payload"] or {}).get("power")
+            LOG.info("GET /v1/json von %s → 200 power=%s W", client, power)
             self._send(200, snap["raw"], "application/json")
             return
         if path in ("/", "/index.html"):
+            LOG.info("GET / von %s → 200 Statusseite", client)
             self._send(200, html_status(snap), "text/html; charset=utf-8")
             return
+        LOG.warning("GET %s von %s → 404", path, client)
         self._send(404, b"not found", "text/plain; charset=utf-8")
 
 
@@ -215,15 +258,21 @@ def register_mdns(hostname: str, ip: str, port: int, serial: str, productid: str
     )
     zc = Zeroconf(ip_version=IPVersion.V4Only)
     zc.register_service(info, cooperating_responders=True)
-    print(
-        f"mdns: {hostname}._everhome._tcp.local → {ip}:{port} "
-        f"serial={serial} productid={productid}",
-        flush=True,
+    LOG.info(
+        "mDNS registriert: %s._everhome._tcp.local → %s:%s (serial=%s productid=%s)",
+        hostname,
+        ip,
+        port,
+        serial,
+        productid,
     )
     return zc, info
 
 
 def main() -> None:
+    setup_logging()
+    LOG.info("EcoTracker Bridge startet")
+
     opts = load_options()
     mac = normalize_mac(str(opts.get("mac", "B43A45A1B2C3")))
     hostname = f"ecotracker-{mac.lower()}"
@@ -245,31 +294,38 @@ def main() -> None:
         }
     )
 
-    print(f"quelle: {source}", flush=True)
-    print(f"listen: 0.0.0.0:{port}  announce: {announce_ip}", flush=True)
+    LOG.info("Quelle:        %s", source)
+    LOG.info("HTTP-Listen:   0.0.0.0:%s", port)
+    LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
+    LOG.info("Poll-Intervall: %.0f s", poll_seconds)
+    LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
 
-    threading.Thread(target=poll_loop, args=(source, poll_seconds), daemon=True).start()
+    threading.Thread(target=poll_loop, args=(source, poll_seconds), daemon=True, name="poll").start()
 
     zc = None
     try:
         zc, _info = register_mdns(hostname, announce_ip, port, serial, productid)
     except Exception as exc:
-        print(f"mdns fehlgeschlagen: {exc}", flush=True)
-        print(
-            "HTTP läuft trotzdem. Growatt NOAH findet den Zähler ohne mDNS nicht.",
-            flush=True,
-        )
+        LOG.error("mDNS fehlgeschlagen: %s", exc)
+        LOG.error("HTTP läuft trotzdem. Growatt NOAH findet den Zähler ohne mDNS nicht.")
 
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    try:
+        httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    except OSError as exc:
+        LOG.error("HTTP-Server startet nicht auf Port %s: %s", port, exc)
+        raise SystemExit(1) from exc
+
+    LOG.info("HTTP bereit auf Port %s (Status: /  JSON: /v1/json)", port)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        pass
+        LOG.info("Stop angefordert")
     finally:
         httpd.server_close()
         if zc is not None:
             zc.unregister_all_services()
             zc.close()
+        LOG.info("EcoTracker Bridge beendet")
 
 
 if __name__ == "__main__":
