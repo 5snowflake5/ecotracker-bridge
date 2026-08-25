@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Lightweight everHome EcoTracker proxy for Growatt NOAH.
 
-Polls a physical EcoTracker (`GET /v1/json`), serves the same payload on
-port 80, and announces `_everhome._tcp` via mDNS so ShinePhone can pair.
+Serves EcoTracker JSON on port 80 + mDNS `_everhome._tcp`.
+Physical meter is fetched on demand when a client (Growatt) hits `/v1/json`.
+Optional background poll via poll_seconds > 0.
 """
 
 from __future__ import annotations
@@ -24,12 +25,14 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
+VERSION = "1.0.8"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
 
-def setup_logging() -> None:
+def setup_logging(level_name: str = "info") -> None:
     """Stdout = App-Log im Home Assistant Supervisor."""
+    level = logging.DEBUG if str(level_name).lower() == "debug" else logging.INFO
     root = logging.getLogger()
     root.handlers.clear()
     handler = logging.StreamHandler(sys.stdout)
@@ -40,7 +43,7 @@ def setup_logging() -> None:
         )
     )
     root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    root.setLevel(level)
     logging.getLogger("zeroconf").setLevel(logging.WARNING)
 
 
@@ -65,16 +68,34 @@ def try_load_options() -> dict[str, Any] | None:
     return None
 
 
-def parse_poll_seconds(raw: Any, fallback: float = 30.0) -> float:
+def parse_poll_seconds(raw: Any, fallback: float = 0.0) -> float:
+    """0 = kein Hintergrund-Poll (Growatt triggert über GET /v1/json)."""
     try:
         value = float(raw)
     except (TypeError, ValueError):
         LOG.error("Ungültiges poll_seconds=%r → Fallback %.0f", raw, fallback)
         return fallback
-    if value < 1:
-        LOG.error("poll_seconds=%.0f zu klein → auf 1 gesetzt", value)
-        return 1.0
+    if value < 0:
+        return 0.0
     return value
+
+
+def apply_runtime_options(opts: dict[str, Any]) -> None:
+    level = str(opts.get("log_level", META.get("log_level", "info"))).lower()
+    if level not in ("info", "debug"):
+        level = "info"
+    if level != META.get("log_level"):
+        setup_logging(level)
+        META["log_level"] = level
+        LOG.info("Log-Level: %s", level.upper())
+    source = source_json_url(str(opts.get("source_url", META.get("source_url", ""))))
+    if source and source != META.get("source_url"):
+        LOG.info("source_url geändert: %s → %s", META.get("source_url"), source)
+        META["source_url"] = source
+    poll = parse_poll_seconds(opts.get("poll_seconds", META.get("poll_seconds", 0)), 0.0)
+    if poll != META.get("poll_seconds"):
+        LOG.info("poll_seconds geändert: %s → %.0f", META.get("poll_seconds"), poll)
+        META["poll_seconds"] = poll
 
 
 def load_options() -> dict[str, Any]:
@@ -135,11 +156,11 @@ class MeterState:
 
 STATE = MeterState()
 META: dict[str, Any] = {}
-FETCH_HEADERS = {"Accept": "application/json", "User-Agent": "ecotracker-bridge/1.0"}
+FETCH_HEADERS = {"Accept": "application/json", "User-Agent": f"ecotracker-bridge/{VERSION}"}
 
 
 class ClientPollStats:
-    """Misst, wie oft Clients (z. B. Growatt NOAH) /v1/json abrufen."""
+    """Misst Client-Intervalle für /v1/json (nur Debug-Log)."""
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -163,6 +184,8 @@ class ClientPollStats:
             return n, delta, avg
 
     def maybe_summary(self, every_seconds: float = 60.0) -> None:
+        if not LOG.isEnabledFor(logging.DEBUG):
+            return
         now = time.monotonic()
         with self.lock:
             if now - self.last_summary_at < every_seconds:
@@ -173,32 +196,17 @@ class ClientPollStats:
             lines = []
             for client, n in sorted(self.count.items(), key=lambda x: -x[1]):
                 if n < 2:
-                    lines.append(f"{client}: {n} Hit(s), noch kein Intervall")
+                    lines.append(f"{client}: {n} Hit(s)")
                     continue
                 avg = self.sum_delta.get(client, 0.0) / (n - 1)
                 lines.append(f"{client}: {n} Hits, Ø {avg:.1f} s")
-            tip = min(
-                (
-                    self.sum_delta[c] / (self.count[c] - 1)
-                    for c in self.count
-                    if self.count[c] >= 2
-                ),
-                default=None,
-            )
-        LOG.info("Client-Poll-Zusammenfassung (letzte Periode): %s", " | ".join(lines))
-        if tip is not None:
-            suggest = max(1, min(60, int(round(tip))))
-            LOG.info(
-                "Empfehlung Hintergrund-poll_seconds ≈ %s s (am häufigsten ≈ %.1f s)",
-                suggest,
-                tip,
-            )
+        LOG.debug("Client-Poll-Zusammenfassung: %s", " | ".join(lines))
 
 
 CLIENT_STATS = ClientPollStats()
 
 
-def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any] | None:
+def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
     """Holt frisch vom physischen EcoTracker und aktualisiert den Cache."""
     try:
         req = Request(url, headers=FETCH_HEADERS, method="GET")
@@ -215,14 +223,13 @@ def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any
             STATE.last_error = None
             STATE.polls_ok += 1
             ok_count = STATE.polls_ok
-        if log_ok:
-            LOG.info(
-                "Quelle ok (%s) #%s: power=%s W (avg=%s)",
-                reason,
-                ok_count,
-                data.get("power"),
-                data.get("powerAvg"),
-            )
+        LOG.debug(
+            "Quelle ok (%s) #%s: power=%s W (avg=%s)",
+            reason,
+            ok_count,
+            data.get("power"),
+            data.get("powerAvg"),
+        )
         return data
     except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         with STATE.lock:
@@ -233,33 +240,22 @@ def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any
         return None
 
 
-def poll_loop(url: str, interval: float) -> None:
-    # Hintergrund nur für Statusseite. Live-Daten für NOAH kommen über GET /v1/json.
-    current_url = url
-    current_interval = interval
-    LOG.info("Hintergrund-Poll aktiv: alle %.0f s → %s", current_interval, current_url)
+def poll_loop() -> None:
+    """Optionaler Hintergrund-Poll. Bei poll_seconds=0 nur Options neu laden."""
     n = 0
     while True:
-        n += 1
         opts = try_load_options()
         if opts is not None:
-            new_interval = parse_poll_seconds(opts.get("poll_seconds", current_interval), current_interval)
-            new_url = source_json_url(str(opts.get("source_url", current_url)))
-            if new_interval != current_interval:
-                LOG.info(
-                    "poll_seconds geändert: %.0f s → %.0f s (ohne Neustart)",
-                    current_interval,
-                    new_interval,
-                )
-                current_interval = new_interval
-                META["poll_seconds"] = current_interval
-            if new_url != current_url:
-                LOG.info("source_url geändert: %s → %s", current_url, new_url)
-                current_url = new_url
-                META["source_url"] = current_url
-        fetch_source(current_url, reason=f"hintergrund #{n}", log_ok=True)
-        LOG.info("Hintergrund: warte %.0f s bis zum nächsten Poll", current_interval)
-        time.sleep(current_interval)
+            apply_runtime_options(opts)
+        interval = float(META.get("poll_seconds") or 0)
+        url = str(META.get("source_url") or "")
+        if interval <= 0 or not url:
+            time.sleep(5)
+            continue
+        n += 1
+        fetch_source(url, reason=f"hintergrund #{n}")
+        LOG.debug("Hintergrund: warte %.0f s", interval)
+        time.sleep(interval)
 
 
 def html_status(snap: dict[str, Any]) -> bytes:
@@ -268,12 +264,14 @@ def html_status(snap: dict[str, Any]) -> bytes:
     last_ok_s = last_ok.strftime("%d.%m.%Y %H:%M:%S") if last_ok else "noch keine Daten"
     err = snap["last_error"] or "—"
     power = payload.get("power") if payload else "—"
+    poll = META.get("poll_seconds", 0)
+    poll_txt = "aus (nur on-demand via GET /v1/json)" if not poll else f"{poll:.0f} s"
     rows = ""
     if payload:
         for key, value in payload.items():
             rows += f"<tr><td>{key}</td><td>{value}</td></tr>"
     else:
-        rows = "<tr><td colspan=2>Warte auf den physischen EcoTracker…</td></tr>"
+        rows = "<tr><td colspan=2>Warte auf Abruf vom Growatt NOAH (oder öffne /v1/json)…</td></tr>"
 
     html = f"""<!DOCTYPE html>
 <html lang="de">
@@ -292,13 +290,15 @@ def html_status(snap: dict[str, Any]) -> bytes:
   </style>
 </head>
 <body>
-  <h1>EcoTracker Bridge</h1>
-  <p class="muted">Virtueller EcoTracker für Growatt NOAH. Seite aktualisiert sich selbst.</p>
+  <h1>EcoTracker Bridge {VERSION}</h1>
+  <p class="muted">Virtueller EcoTracker für Growatt NOAH. Live-Fetch bei jedem GET /v1/json.</p>
   <table>
     <tr><th>Leistung</th><td>{power} W</td></tr>
-    <tr><th>Letzter erfolgreicher Poll</th><td>{last_ok_s}</td></tr>
+    <tr><th>Letzter erfolgreicher Abruf</th><td>{last_ok_s}</td></tr>
     <tr><th>Letzter Fehler</th><td>{err}</td></tr>
-    <tr><th>Polls ok / fehl</th><td>{snap["polls_ok"]} / {snap["polls_fail"]}</td></tr>
+    <tr><th>Abrufe ok / fehl</th><td>{snap["polls_ok"]} / {snap["polls_fail"]}</td></tr>
+    <tr><th>Hintergrund-Poll</th><td>{poll_txt}</td></tr>
+    <tr><th>Log-Level</th><td>{META.get("log_level", "info")}</td></tr>
     <tr><th>Quelle</th><td><code>{META["source_url"]}</code></td></tr>
     <tr><th>mDNS</th><td><code>{META["hostname"]}._everhome._tcp.local</code></td></tr>
     <tr><th>JSON</th><td><a href="/v1/json"><code>/v1/json</code></a></td></tr>
@@ -317,7 +317,6 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
-        # Standard-Access-Log unterdrücken; wir loggen gezielt in do_GET.
         return
 
     def _client(self) -> str:
@@ -344,26 +343,19 @@ class Handler(BaseHTTPRequestHandler):
                 interval_txt = f"Δ={delta:.1f} s{avg_txt}"
             source = META.get("source_url")
             if source:
-                # Jeder Abruf vom NOAH → frischer Call zum physischen EcoTracker.
-                fetch_source(
-                    source,
-                    reason=f"GET /v1/json von {client} ({interval_txt})",
-                    log_ok=True,
-                )
+                fetch_source(source, reason=f"GET /v1/json von {client} ({interval_txt})")
             snap = STATE.snapshot()
             if snap["raw"] is None:
                 LOG.warning(
-                    "GET /v1/json von %s → 503 (keine Daten) [%s, Hit #%s]",
+                    "GET /v1/json von %s → 503 (keine Daten vom physischen EcoTracker)",
                     client,
-                    interval_txt,
-                    n,
                 )
                 msg = json.dumps({"error": "noch keine Daten vom physischen EcoTracker"}).encode()
                 self._send(503, msg, "application/json; charset=utf-8")
                 CLIENT_STATS.maybe_summary()
                 return
             power = (snap["payload"] or {}).get("power")
-            LOG.info(
+            LOG.debug(
                 "GET /v1/json von %s → 200 power=%s W [%s, Hit #%s]",
                 client,
                 power,
@@ -373,9 +365,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, snap["raw"], "application/json")
             CLIENT_STATS.maybe_summary()
             return
-        snap = STATE.snapshot()
         if path in ("/", "/index.html"):
-            LOG.info("GET / von %s → 200 Statusseite", client)
+            source = META.get("source_url")
+            if source:
+                # Statusseite einmal frisch holen, ohne Dauer-Poll.
+                fetch_source(source, reason=f"GET / von {client}")
+            snap = STATE.snapshot()
+            LOG.debug("GET / von %s → 200 Statusseite", client)
             self._send(200, html_status(snap), "text/html; charset=utf-8")
             return
         LOG.warning("GET %s von %s → 404", path, client)
@@ -410,18 +406,21 @@ def register_mdns(hostname: str, ip: str, port: int, serial: str, productid: str
 
 
 def main() -> None:
-    setup_logging()
-    LOG.info("EcoTracker Bridge startet")
+    setup_logging("info")
+    LOG.info("EcoTracker Bridge %s startet", VERSION)
 
     opts = load_options()
-    LOG.info("Rohe Options: %s", json.dumps(opts, ensure_ascii=False, sort_keys=True))
+    LOG.debug("Rohe Options: %s", json.dumps(opts, ensure_ascii=False, sort_keys=True))
     mac = normalize_mac(str(opts.get("mac", "B43A45A1B2C3")))
     hostname = f"ecotracker-{mac.lower()}"
     serial = str(opts.get("serial", "293d45273261"))
     productid = str(opts.get("productid", "1137"))
     port = int(opts.get("port", 80))
-    raw_poll = opts.get("poll_seconds", 30)
-    poll_seconds = parse_poll_seconds(raw_poll, 30.0)
+    poll_seconds = parse_poll_seconds(opts.get("poll_seconds", 0), 0.0)
+    log_level = str(opts.get("log_level", "info")).lower()
+    if log_level not in ("info", "debug"):
+        log_level = "info"
+    setup_logging(log_level)
     source = source_json_url(str(opts["source_url"]))
     announce_ip = str(opts.get("announce_ip") or "").strip() or detect_ipv4()
 
@@ -434,21 +433,22 @@ def main() -> None:
             "serial": serial,
             "productid": productid,
             "poll_seconds": poll_seconds,
-            "version": "1.0.7",
+            "log_level": log_level,
+            "version": VERSION,
         }
     )
 
-    LOG.info("Version:       1.0.7")
     LOG.info("Quelle:        %s", source)
     LOG.info("HTTP-Listen:   0.0.0.0:%s", port)
     LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
-    LOG.info(
-        "Poll-Intervall: %.0f s (nur Hintergrund; GET /v1/json = immer live, mit Δ im Log)",
-        poll_seconds,
-    )
+    if poll_seconds > 0:
+        LOG.info("Hintergrund-Poll: alle %.0f s (optional)", poll_seconds)
+    else:
+        LOG.info("Hintergrund-Poll: aus (Growatt/Clients lösen Live-Fetch über GET /v1/json aus)")
+    LOG.info("Log-Level:     %s", log_level.upper())
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
 
-    threading.Thread(target=poll_loop, args=(source, poll_seconds), daemon=True, name="poll").start()
+    threading.Thread(target=poll_loop, daemon=True, name="poll").start()
 
     zc = None
     try:
