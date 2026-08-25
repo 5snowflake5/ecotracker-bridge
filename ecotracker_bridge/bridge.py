@@ -138,6 +138,66 @@ META: dict[str, Any] = {}
 FETCH_HEADERS = {"Accept": "application/json", "User-Agent": "ecotracker-bridge/1.0"}
 
 
+class ClientPollStats:
+    """Misst, wie oft Clients (z. B. Growatt NOAH) /v1/json abrufen."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.last_at: dict[str, float] = {}
+        self.count: dict[str, int] = {}
+        self.sum_delta: dict[str, float] = {}
+        self.last_summary_at = 0.0
+
+    def record(self, client: str) -> tuple[int, float | None, float | None]:
+        now = time.monotonic()
+        with self.lock:
+            prev = self.last_at.get(client)
+            delta = None if prev is None else now - prev
+            self.last_at[client] = now
+            n = self.count.get(client, 0) + 1
+            self.count[client] = n
+            avg = None
+            if delta is not None:
+                self.sum_delta[client] = self.sum_delta.get(client, 0.0) + delta
+                avg = self.sum_delta[client] / max(1, n - 1)
+            return n, delta, avg
+
+    def maybe_summary(self, every_seconds: float = 60.0) -> None:
+        now = time.monotonic()
+        with self.lock:
+            if now - self.last_summary_at < every_seconds:
+                return
+            if not self.count:
+                return
+            self.last_summary_at = now
+            lines = []
+            for client, n in sorted(self.count.items(), key=lambda x: -x[1]):
+                if n < 2:
+                    lines.append(f"{client}: {n} Hit(s), noch kein Intervall")
+                    continue
+                avg = self.sum_delta.get(client, 0.0) / (n - 1)
+                lines.append(f"{client}: {n} Hits, Ø {avg:.1f} s")
+            tip = min(
+                (
+                    self.sum_delta[c] / (self.count[c] - 1)
+                    for c in self.count
+                    if self.count[c] >= 2
+                ),
+                default=None,
+            )
+        LOG.info("Client-Poll-Zusammenfassung (letzte Periode): %s", " | ".join(lines))
+        if tip is not None:
+            suggest = max(1, min(60, int(round(tip))))
+            LOG.info(
+                "Empfehlung Hintergrund-poll_seconds ≈ %s s (am häufigsten ≈ %.1f s)",
+                suggest,
+                tip,
+            )
+
+
+CLIENT_STATS = ClientPollStats()
+
+
 def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any] | None:
     """Holt frisch vom physischen EcoTracker und aktualisiert den Cache."""
     try:
@@ -276,19 +336,42 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         client = self._client()
         if path in ("/v1/json", "/v1/json/"):
+            n, delta, avg = CLIENT_STATS.record(client)
+            if delta is None:
+                interval_txt = "erster Hit"
+            else:
+                avg_txt = f", Ø {avg:.1f} s" if avg is not None else ""
+                interval_txt = f"Δ={delta:.1f} s{avg_txt}"
             source = META.get("source_url")
             if source:
                 # Jeder Abruf vom NOAH → frischer Call zum physischen EcoTracker.
-                fetch_source(source, reason=f"GET /v1/json von {client}", log_ok=True)
+                fetch_source(
+                    source,
+                    reason=f"GET /v1/json von {client} ({interval_txt})",
+                    log_ok=True,
+                )
             snap = STATE.snapshot()
             if snap["raw"] is None:
-                LOG.warning("GET /v1/json von %s → 503 (keine Daten vom physischen EcoTracker)", client)
+                LOG.warning(
+                    "GET /v1/json von %s → 503 (keine Daten) [%s, Hit #%s]",
+                    client,
+                    interval_txt,
+                    n,
+                )
                 msg = json.dumps({"error": "noch keine Daten vom physischen EcoTracker"}).encode()
                 self._send(503, msg, "application/json; charset=utf-8")
+                CLIENT_STATS.maybe_summary()
                 return
             power = (snap["payload"] or {}).get("power")
-            LOG.info("GET /v1/json von %s → 200 power=%s W", client, power)
+            LOG.info(
+                "GET /v1/json von %s → 200 power=%s W [%s, Hit #%s]",
+                client,
+                power,
+                interval_txt,
+                n,
+            )
             self._send(200, snap["raw"], "application/json")
+            CLIENT_STATS.maybe_summary()
             return
         snap = STATE.snapshot()
         if path in ("/", "/index.html"):
@@ -351,16 +434,16 @@ def main() -> None:
             "serial": serial,
             "productid": productid,
             "poll_seconds": poll_seconds,
-            "version": "1.0.6",
+            "version": "1.0.7",
         }
     )
 
-    LOG.info("Version:       1.0.6")
+    LOG.info("Version:       1.0.7")
     LOG.info("Quelle:        %s", source)
     LOG.info("HTTP-Listen:   0.0.0.0:%s", port)
     LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
     LOG.info(
-        "Poll-Intervall: %.0f s (nur Hintergrund; GET /v1/json = immer live zum physischen Tracker)",
+        "Poll-Intervall: %.0f s (nur Hintergrund; GET /v1/json = immer live, mit Δ im Log)",
         poll_seconds,
     )
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
