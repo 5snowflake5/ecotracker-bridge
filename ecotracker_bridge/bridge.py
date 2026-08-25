@@ -149,13 +149,13 @@ def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any
 
 
 def poll_loop(url: str, interval: float) -> None:
-    # Hintergrund nur für Statusseite / Warmhalten; NOAH triggert live über /v1/json.
-    log_every = max(1, int(30 / max(interval, 1)))
-    LOG.info("Hintergrund-Poll: %s alle %.0f s", url, interval)
+    # Hintergrund nur für Statusseite. Live-Daten für NOAH kommen über GET /v1/json.
+    LOG.info("Hintergrund-Poll aktiv: alle %.0f s → %s", interval, url)
     n = 0
     while True:
         n += 1
-        fetch_source(url, reason="hintergrund", log_ok=(n == 1 or n % log_every == 0))
+        fetch_source(url, reason=f"hintergrund #{n}", log_ok=True)
+        LOG.info("Hintergrund: warte %.0f s bis zum nächsten Poll", interval)
         time.sleep(interval)
 
 
@@ -288,12 +288,21 @@ def main() -> None:
     LOG.info("EcoTracker Bridge startet")
 
     opts = load_options()
+    LOG.info("Rohe Options: %s", json.dumps(opts, ensure_ascii=False, sort_keys=True))
     mac = normalize_mac(str(opts.get("mac", "B43A45A1B2C3")))
     hostname = f"ecotracker-{mac.lower()}"
     serial = str(opts.get("serial", "293d45273261"))
     productid = str(opts.get("productid", "1137"))
     port = int(opts.get("port", 80))
-    poll_seconds = float(opts.get("poll_seconds", 1))
+    raw_poll = opts.get("poll_seconds", 30)
+    try:
+        poll_seconds = float(raw_poll)
+    except (TypeError, ValueError):
+        LOG.error("Ungültiges poll_seconds=%r → Fallback 30", raw_poll)
+        poll_seconds = 30.0
+    if poll_seconds < 1:
+        LOG.error("poll_seconds=%.0f zu klein → auf 1 gesetzt", poll_seconds)
+        poll_seconds = 1.0
     source = source_json_url(str(opts["source_url"]))
     announce_ip = str(opts.get("announce_ip") or "").strip() or detect_ipv4()
 
@@ -305,13 +314,19 @@ def main() -> None:
             "port": port,
             "serial": serial,
             "productid": productid,
+            "poll_seconds": poll_seconds,
+            "version": "1.0.5",
         }
     )
 
+    LOG.info("Version:       1.0.5")
     LOG.info("Quelle:        %s", source)
     LOG.info("HTTP-Listen:   0.0.0.0:%s", port)
     LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
-    LOG.info("Poll-Intervall: %.0f s", poll_seconds)
+    LOG.info(
+        "Poll-Intervall: %.0f s (nur Hintergrund/Statusseite; GET /v1/json holt immer live)",
+        poll_seconds,
+    )
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
 
     threading.Thread(target=poll_loop, args=(source, poll_seconds), daemon=True, name="poll").start()
