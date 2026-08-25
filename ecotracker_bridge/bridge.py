@@ -25,7 +25,7 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.0.8"
+VERSION = "1.0.9"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
@@ -208,10 +208,12 @@ CLIENT_STATS = ClientPollStats()
 
 def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
     """Holt frisch vom physischen EcoTracker und aktualisiert den Cache."""
+    started = time.perf_counter()
     try:
         req = Request(url, headers=FETCH_HEADERS, method="GET")
         with urlopen(req, timeout=2.5) as resp:
             body = resp.read()
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
         data = json.loads(body)
         if not isinstance(data, dict):
             raise ValueError("Antwort ist kein JSON-Objekt")
@@ -224,19 +226,27 @@ def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
             STATE.polls_ok += 1
             ok_count = STATE.polls_ok
         LOG.debug(
-            "Quelle ok (%s) #%s: power=%s W (avg=%s)",
+            "Quelle ok (%s) #%s: power=%s W (avg=%s) ecotracker=%.0f ms",
             reason,
             ok_count,
             data.get("power"),
             data.get("powerAvg"),
+            elapsed_ms,
         )
         return data
     except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
         with STATE.lock:
             STATE.last_error = str(exc)
             STATE.polls_fail += 1
             fail_count = STATE.polls_fail
-        LOG.error("Quelle fehlgeschlagen (%s) #%s: %s", reason, fail_count, exc)
+        LOG.error(
+            "Quelle fehlgeschlagen (%s) #%s nach %.0f ms: %s",
+            reason,
+            fail_count,
+            elapsed_ms,
+            exc,
+        )
         return None
 
 
