@@ -4,16 +4,16 @@
     "step": {
       "user": {
         "title": "EcoTracker Local",
-        "description": "Physischen EcoTracker per lokaler API anbinden (`/v1/json`).",
+        "description": "Liest den Bridge-Cache unter `/v1/cache` (kein Extra-Poll auf den physischen EcoTracker). Host = Pi/Bridge, z. B. 192.168.55.151.",
         "data": {
-          "host": "IP oder URL (z. B. 192.168.55.140)",
-          "scan_interval": "Abfrageintervall in Sekunden"
+          "host": "Bridge-IP oder URL (nicht der physische EcoTracker)",
+          "scan_interval": "Abfrageintervall Bridge-Cache in Sekunden"
         }
       }
     },
     "error": {
-      "cannot_connect": "Keine Verbindung zum EcoTracker",
-      "invalid_response": "Antwort enthält kein gültiges EcoTracker-JSON"
+      "cannot_connect": "Keine Verbindung zur Bridge (/v1/cache)",
+      "invalid_response": "Cache leer oder ungültig – Growatt muss zuerst /v1/json abrufen"
     },
     "abort": {
       "already_configured": "Dieser EcoTracker ist bereits konfiguriert"

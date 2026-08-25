@@ -1,4 +1,4 @@
-"""EcoTracker Local — pollt GET /v1/json vom physischen everHome EcoTracker."""
+"""EcoTracker Local — liest den Bridge-Cache (`/v1/cache`), kein Extra-Poll auf Hardware."""
 
 from __future__ import annotations
 
@@ -20,15 +20,22 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 
-def source_url(host: str) -> str:
+def cache_url(host: str) -> str:
+    """Bridge-Cache. Niemals /v1/json — das würde den physischen EcoTracker triggern."""
     host = host.strip()
     if host.startswith("http://") or host.startswith("https://"):
         base = host.rstrip("/")
     else:
         base = f"http://{host}"
-    if base.endswith("/v1/json"):
-        return base
-    return f"{base}/v1/json"
+    for suffix in ("/v1/cache", "/v1/json"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return f"{base}/v1/cache"
+
+
+# Backwards-compatible name used by config_flow
+source_url = cache_url
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -37,17 +44,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         CONF_SCAN_INTERVAL,
         entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
     )
-    url = source_url(host)
+    url = cache_url(host)
     session = async_get_clientsession(hass)
 
     async def async_update() -> dict[str, Any]:
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                if resp.status == 503:
+                    raise UpdateFailed(
+                        "Bridge-Cache leer – warte bis Growatt einmal /v1/json geholt hat"
+                    )
                 if resp.status != 200:
                     raise UpdateFailed(f"HTTP {resp.status} von {url}")
                 data = await resp.json(content_type=None)
+        except UpdateFailed:
+            raise
         except Exception as exc:
-            raise UpdateFailed(f"EcoTracker nicht erreichbar ({url}): {exc}") from exc
+            raise UpdateFailed(f"Bridge-Cache nicht erreichbar ({url}): {exc}") from exc
         if not isinstance(data, dict):
             raise UpdateFailed("Antwort ist kein JSON-Objekt")
         return data

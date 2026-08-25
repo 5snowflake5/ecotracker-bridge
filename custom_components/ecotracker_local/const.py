@@ -1,8 +1,9 @@
 """Constants for EcoTracker Local."""
 
 DOMAIN = "ecotracker_local"
-DEFAULT_NAME = "EcoTracker"
+DEFAULT_NAME = "EcoTracker Bridge"
 DEFAULT_SCAN_INTERVAL = 5
+DEFAULT_HOST = "192.168.55.151"
 CONF_HOST = "host"
 CONF_SCAN_INTERVAL = "scan_interval"
 

@@ -25,7 +25,7 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.0.9"
+VERSION = "1.1.0"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
@@ -311,7 +311,8 @@ def html_status(snap: dict[str, Any]) -> bytes:
     <tr><th>Log-Level</th><td>{META.get("log_level", "info")}</td></tr>
     <tr><th>Quelle</th><td><code>{META["source_url"]}</code></td></tr>
     <tr><th>mDNS</th><td><code>{META["hostname"]}._everhome._tcp.local</code></td></tr>
-    <tr><th>JSON</th><td><a href="/v1/json"><code>/v1/json</code></a></td></tr>
+    <tr><th>JSON live (NOAH)</th><td><a href="/v1/json"><code>/v1/json</code></a></td></tr>
+    <tr><th>JSON Cache (HA)</th><td><a href="/v1/cache"><code>/v1/cache</code></a></td></tr>
     <tr><th>Angekündigte IP</th><td>{META["announce_ip"]}:{META["port"]}</td></tr>
     <tr><th>Serial / productid</th><td>{META["serial"]} / {META["productid"]}</td></tr>
   </table>
@@ -321,6 +322,21 @@ def html_status(snap: dict[str, Any]) -> bytes:
 </html>
 """
     return html.encode("utf-8")
+
+
+def cache_payload(snap: dict[str, Any]) -> dict[str, Any] | None:
+    """Cache für HA-Sensoren: letzte NOAH-Werte, ohne physischen EcoTracker anzufassen."""
+    payload = snap.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    out = dict(payload)
+    last_ok = snap.get("last_ok")
+    age = None
+    if last_ok is not None:
+        age = max(0.0, (berlin_now() - last_ok).total_seconds())
+        out["ageSeconds"] = round(age, 1)
+        out["lastOk"] = last_ok.isoformat()
+    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -375,13 +391,30 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, snap["raw"], "application/json")
             CLIENT_STATS.maybe_summary()
             return
-        if path in ("/", "/index.html"):
-            source = META.get("source_url")
-            if source:
-                # Statusseite einmal frisch holen, ohne Dauer-Poll.
-                fetch_source(source, reason=f"GET / von {client}")
+        if path in ("/v1/cache", "/v1/cache/"):
+            # HA-Sensoren: nur Speicher, kein Call zum physischen EcoTracker.
             snap = STATE.snapshot()
-            LOG.debug("GET / von %s → 200 Statusseite", client)
+            cached = cache_payload(snap)
+            if cached is None:
+                LOG.debug("GET /v1/cache von %s → 503 (noch kein Cache)", client)
+                msg = json.dumps(
+                    {"error": "noch kein Cache – warte auf Growatt-Abruf von /v1/json"}
+                ).encode()
+                self._send(503, msg, "application/json; charset=utf-8")
+                return
+            body = json.dumps(cached, separators=(",", ":")).encode("utf-8")
+            LOG.debug(
+                "GET /v1/cache von %s → 200 power=%s W age=%ss",
+                client,
+                cached.get("power"),
+                cached.get("ageSeconds"),
+            )
+            self._send(200, body, "application/json")
+            return
+        if path in ("/", "/index.html"):
+            # Statusseite nur Cache – sonst würde meta refresh den physischen Tracker killen.
+            snap = STATE.snapshot()
+            LOG.debug("GET / von %s → 200 Statusseite (Cache)", client)
             self._send(200, html_status(snap), "text/html; charset=utf-8")
             return
         LOG.warning("GET %s von %s → 404", path, client)
