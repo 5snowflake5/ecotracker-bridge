@@ -1,4 +1,4 @@
-FROM ghcr.io/home-assistant/base:3.22.1
+FROM ghcr.io/home-assistant/base:3.22
 
 WORKDIR /app
 
