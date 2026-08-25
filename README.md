@@ -2,42 +2,45 @@
 
 Schlanker Ersatz für uni-meter: liest einen **physischen everHome EcoTracker** und gibt ihn als virtuellen EcoTracker aus, damit der **Growatt NOAH** ihn lokal koppeln kann.
 
-- HTTP `GET /v1/json` auf **Port 80**
-- mDNS `_everhome._tcp` mit TXT `ip`, `serial`, `productid=1137`
-- Statusseite unter `http://<pi-ip>/`
-- Deutlich weniger RAM als die JVM von uni-meter
+Zusätzlich: **HA-Integration „EcoTracker Local“** für Sensoren / History / Energy Dashboard.
 
-## Installation über GitHub (empfohlen)
+## App (Growatt-Emulation)
 
-1. In Home Assistant: **Einstellungen → Add-ons → Add-on Store → ⋮ → Repositories**
-2. Repository hinzufügen:
+1. Einstellungen → **Apps** → App installieren → ⋮ → **Repositories**
+2. `https://github.com/5snowflake5/ecotracker-bridge`
+3. **EcoTracker Bridge** installieren, uni-meter stoppen, starten
+4. `source_url` = `http://192.168.55.140`
+5. ShinePhone: Zähler → `ecotracker-b43a45a1b2c3`
 
-   ```text
-   https://github.com/5snowflake5/ecotracker-bridge
-   ```
+## Integration (Sensoren zum Auswerten)
 
-3. Store neu laden, **EcoTracker Bridge** installieren.
-4. **uni-meter stoppen**, bevor du startest (Port 80).
-5. Konfiguration: `source_url` = `http://192.168.55.140` (bereits Default).
-6. Starten. Der erste Build kann ein paar Minuten dauern. Prüfen: `http://<pi-ip>/v1/json`
-7. ShinePhone: Zähler neu suchen → `ecotracker-b43a45a1b2c3`
+Pollt den **physischen** EcoTracker direkt (`/v1/json`), unabhängig vom NOAH.
 
-### Image fehlt / startet nicht
+### HACS
 
-Lokale Apps bauen das Docker-Image selbst. Wenn der Supervisor z. B. `Image …:1.0.1 does not exist` meldet:
+1. HACS → ⋮ → Custom repositories  
+2. URL: `https://github.com/5snowflake5/ecotracker-bridge`, Kategorie **Integration**
+3. **EcoTracker Local** installieren, Home Assistant neu starten
+4. Einstellungen → Geräte & Dienste → Integration hinzufügen → **EcoTracker Local**
+5. Host: `192.168.55.140`, Intervall z. B. `5` Sekunden
 
-1. App **deinstallieren**
-2. Store neu laden (Repos → ⋮ → ggf. Repository kurz prüfen)
-3. **EcoTracker Bridge** erneut installieren (erzwingt Build von `1.0.2`)
+### Manuell
 
-Konfiguration bleibt oft erhalten; `source_url` und `mac` trotzdem nochmal prüfen.
+`custom_components/ecotracker_local/` nach `/config/custom_components/ecotracker_local/` kopieren, HA neu starten, Integration hinzufügen.
 
-## Manuell (lokales Add-on)
+### Sensoren
 
-Ordner `ecotracker_bridge/` nach `/addons/ecotracker_bridge/` kopieren, Store neu laden, installieren.
+| Sensor | JSON | Hinweis |
+|--------|------|---------|
+| Leistung | `power` | negativ = Einspeisung |
+| Leistung Mittelwert | `powerAvg` | letzte Minute |
+| Phase 1–3 | `powerPhase*` | falls vorhanden |
+| Energie Bezug / Einspeisung | `energyCounterIn/Out` | Wh, Energy Dashboard |
+
+Für Energy Dashboard: Bezug = `energy_in`, Einspeisung = `energy_out` (Grid).
 
 ## Hinweise
 
-- Pi, EcoTracker und NOAH im **selben WLAN/LAN** (mDNS geht nicht über Router/VLAN).
-- MAC nach dem Koppeln nicht ändern, sonst muss der NOAH neu koppeln.
-- Falls mDNS auf HaOS fehlschlägt: HTTP läuft trotzdem; dann ggf. Pyscript-Fallback wie bei uni-meter.
+- Pi, EcoTracker und NOAH im selben LAN (mDNS).
+- MAC der Bridge nach dem Koppeln nicht ändern.
+- Hintergrund-Poll der Bridge Default `0` (NOAH pollt selbst ~alle 3 s).
