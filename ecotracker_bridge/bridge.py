@@ -53,14 +53,39 @@ def berlin_now() -> datetime:
         return datetime.now(BERLIN)
 
 
-def load_options() -> dict[str, Any]:
+def try_load_options() -> dict[str, Any] | None:
     for path in OPTIONS_PATHS:
         if os.path.isfile(path):
-            with open(path, encoding="utf-8") as fh:
-                data = json.load(fh)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    return json.load(fh)
+            except (OSError, json.JSONDecodeError) as exc:
+                LOG.error("Options lesen fehlgeschlagen (%s): %s", path, exc)
+                return None
+    return None
+
+
+def parse_poll_seconds(raw: Any, fallback: float = 30.0) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        LOG.error("Ungültiges poll_seconds=%r → Fallback %.0f", raw, fallback)
+        return fallback
+    if value < 1:
+        LOG.error("poll_seconds=%.0f zu klein → auf 1 gesetzt", value)
+        return 1.0
+    return value
+
+
+def load_options() -> dict[str, Any]:
+    data = try_load_options()
+    if data is None:
+        raise SystemExit(f"Keine Optionsdatei gefunden ({', '.join(OPTIONS_PATHS)})")
+    for path in OPTIONS_PATHS:
+        if os.path.isfile(path):
             LOG.info("Konfiguration geladen aus %s", path)
-            return data
-    raise SystemExit(f"Keine Optionsdatei gefunden ({', '.join(OPTIONS_PATHS)})")
+            break
+    return data
 
 
 def normalize_mac(raw: str) -> str:
@@ -150,13 +175,31 @@ def fetch_source(url: str, *, reason: str, log_ok: bool = True) -> dict[str, Any
 
 def poll_loop(url: str, interval: float) -> None:
     # Hintergrund nur für Statusseite. Live-Daten für NOAH kommen über GET /v1/json.
-    LOG.info("Hintergrund-Poll aktiv: alle %.0f s → %s", interval, url)
+    current_url = url
+    current_interval = interval
+    LOG.info("Hintergrund-Poll aktiv: alle %.0f s → %s", current_interval, current_url)
     n = 0
     while True:
         n += 1
-        fetch_source(url, reason=f"hintergrund #{n}", log_ok=True)
-        LOG.info("Hintergrund: warte %.0f s bis zum nächsten Poll", interval)
-        time.sleep(interval)
+        opts = try_load_options()
+        if opts is not None:
+            new_interval = parse_poll_seconds(opts.get("poll_seconds", current_interval), current_interval)
+            new_url = source_json_url(str(opts.get("source_url", current_url)))
+            if new_interval != current_interval:
+                LOG.info(
+                    "poll_seconds geändert: %.0f s → %.0f s (ohne Neustart)",
+                    current_interval,
+                    new_interval,
+                )
+                current_interval = new_interval
+                META["poll_seconds"] = current_interval
+            if new_url != current_url:
+                LOG.info("source_url geändert: %s → %s", current_url, new_url)
+                current_url = new_url
+                META["source_url"] = current_url
+        fetch_source(current_url, reason=f"hintergrund #{n}", log_ok=True)
+        LOG.info("Hintergrund: warte %.0f s bis zum nächsten Poll", current_interval)
+        time.sleep(current_interval)
 
 
 def html_status(snap: dict[str, Any]) -> bytes:
@@ -295,14 +338,7 @@ def main() -> None:
     productid = str(opts.get("productid", "1137"))
     port = int(opts.get("port", 80))
     raw_poll = opts.get("poll_seconds", 30)
-    try:
-        poll_seconds = float(raw_poll)
-    except (TypeError, ValueError):
-        LOG.error("Ungültiges poll_seconds=%r → Fallback 30", raw_poll)
-        poll_seconds = 30.0
-    if poll_seconds < 1:
-        LOG.error("poll_seconds=%.0f zu klein → auf 1 gesetzt", poll_seconds)
-        poll_seconds = 1.0
+    poll_seconds = parse_poll_seconds(raw_poll, 30.0)
     source = source_json_url(str(opts["source_url"]))
     announce_ip = str(opts.get("announce_ip") or "").strip() or detect_ipv4()
 
@@ -315,16 +351,16 @@ def main() -> None:
             "serial": serial,
             "productid": productid,
             "poll_seconds": poll_seconds,
-            "version": "1.0.5",
+            "version": "1.0.6",
         }
     )
 
-    LOG.info("Version:       1.0.5")
+    LOG.info("Version:       1.0.6")
     LOG.info("Quelle:        %s", source)
     LOG.info("HTTP-Listen:   0.0.0.0:%s", port)
     LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
     LOG.info(
-        "Poll-Intervall: %.0f s (nur Hintergrund/Statusseite; GET /v1/json holt immer live)",
+        "Poll-Intervall: %.0f s (nur Hintergrund; GET /v1/json = immer live zum physischen Tracker)",
         poll_seconds,
     )
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
