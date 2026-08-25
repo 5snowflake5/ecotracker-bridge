@@ -7,7 +7,8 @@ Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen EcoTracke
 | Option | Bedeutung |
 |--------|-----------|
 | `source_url` | IP/URL des physischen EcoTrackers, z. B. `http://192.168.55.140` |
-| `poll_seconds` | Hintergrund-Poll für die Statusseite (1–60). `GET /v1/json` holt immer live vom physischen EcoTracker. |
+| `poll_seconds` | Hintergrund-Poll. **0 = aus** (empfohlen). Growatt holt live über `GET /v1/json`. |
+| `log_level` | `info` (ruhig) oder `debug` (jeder GET inkl. Δ-Intervall) |
 | `port` | HTTP-Port, Growatt erwartet **80** |
 | `mac` | Feste 12-stellige Hex-MAC für den Hostnamen `ecotracker-<mac>` |
 | `serial` / `productid` | mDNS-TXT (Default wie uni-meter, `productid=1137`) |
