@@ -6,11 +6,13 @@ Schlanker Ersatz für uni-meter: Emulation für **Growatt NOAH** + **HA-Sensoren
 
 ```text
 physischer EcoTracker  ←live─  Bridge /v1/json  ←alle ~3s─  Growatt NOAH
-                                      │
-                                      └─Cache─  /v1/cache  ←poll─  HA-Sensoren
+         ↑                      │
+         └── idle nach 5 s ─────┤
+                                └─Cache─  /v1/cache  ←poll─  HA-Sensoren
 ```
 
-Nur `/v1/json` (NOAH) ruft die Hardware. `/v1/cache` und die Statusseite lesen nur den Speicher.
+Nur `/v1/json` (NOAH) oder der Idle-Watchdog (>5 s ohne Trigger) rufen die Hardware.
+`/v1/cache` und die Statusseite lesen nur den Speicher.
 
 ## App (Growatt)
 

@@ -2,9 +2,9 @@ configuration:
   source_url:
     name: EcoTracker-Adresse
     description: IP oder URL des physischen EcoTrackers, ohne /v1/json
-  poll_seconds:
-    name: Hintergrund-Poll
-    description: "0 = aus (empfohlen, Growatt pollt selbst). 1–60 = optionaler Extra-Poll."
+  idle_fetch_seconds:
+    name: Idle-Fetch
+    description: "Selbst holen, wenn so viele Sekunden kein /v1/json (NOAH) kam. 0 = aus. Default 5."
   log_level:
     name: Log-Level
     description: info = ruhig, debug = jeden GET inkl. Intervall Δ
