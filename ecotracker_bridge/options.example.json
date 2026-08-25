@@ -6,5 +6,7 @@
   "mac": "B43A45A1B2C3",
   "serial": "293d45273261",
   "productid": "1137",
-  "announce_ip": ""
+  "announce_ip": "",
+  "shelly_enabled": true,
+  "shelly_mac": "C8C9A3B43A45"
 }
