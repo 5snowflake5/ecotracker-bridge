@@ -1,5 +1,5 @@
 name: EcoTracker Bridge
-version: "1.0.1"
+version: "1.0.2"
 slug: ecotracker_bridge
 description: >-
   Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen
@@ -8,7 +8,6 @@ url: https://github.com/5snowflake5/ecotracker-bridge
 arch:
   - aarch64
   - amd64
-  - armv7
 init: false
 startup: services
 boot: auto

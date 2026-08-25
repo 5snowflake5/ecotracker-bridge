@@ -19,8 +19,18 @@ Schlanker Ersatz für uni-meter: liest einen **physischen everHome EcoTracker** 
 3. Store neu laden, **EcoTracker Bridge** installieren.
 4. **uni-meter stoppen**, bevor du startest (Port 80).
 5. Konfiguration: `source_url` = `http://192.168.55.140` (bereits Default).
-6. Starten. Prüfen: `http://<pi-ip>/v1/json`
+6. Starten. Der erste Build kann ein paar Minuten dauern. Prüfen: `http://<pi-ip>/v1/json`
 7. ShinePhone: Zähler neu suchen → `ecotracker-b43a45a1b2c3`
+
+### Image fehlt / startet nicht
+
+Lokale Apps bauen das Docker-Image selbst. Wenn der Supervisor z. B. `Image …:1.0.1 does not exist` meldet:
+
+1. App **deinstallieren**
+2. Store neu laden (Repos → ⋮ → ggf. Repository kurz prüfen)
+3. **EcoTracker Bridge** erneut installieren (erzwingt Build von `1.0.2`)
+
+Konfiguration bleibt oft erhalten; `source_url` und `mac` trotzdem nochmal prüfen.
 
 ## Manuell (lokales Add-on)
 
