@@ -1,0 +1,45 @@
+{
+  "title": "EcoTracker Local",
+  "config": {
+    "step": {
+      "user": {
+        "title": "EcoTracker Local",
+        "description": "Connect a physical EcoTracker via its local API (`/v1/json`).",
+        "data": {
+          "host": "IP or URL (e.g. 192.168.55.140)",
+          "scan_interval": "Polling interval in seconds"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to EcoTracker",
+      "invalid_response": "Response is not valid EcoTracker JSON"
+    },
+    "abort": {
+      "already_configured": "This EcoTracker is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "scan_interval": "Polling interval in seconds"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "power": { "name": "Power" },
+      "power_avg": { "name": "Power average" },
+      "power_phase_1": { "name": "Power phase 1" },
+      "power_phase_2": { "name": "Power phase 2" },
+      "power_phase_3": { "name": "Power phase 3" },
+      "energy_in": { "name": "Energy import" },
+      "energy_in_t1": { "name": "Energy import T1" },
+      "energy_in_t2": { "name": "Energy import T2" },
+      "energy_out": { "name": "Energy export" }
+    }
+  }
+}

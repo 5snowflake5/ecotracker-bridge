@@ -1,0 +1,11 @@
+{
+  "domain": "ecotracker_local",
+  "name": "EcoTracker Local",
+  "codeowners": ["@fromWaterToWind"],
+  "config_flow": true,
+  "documentation": "https://github.com/fromWaterToWind/ecotracker-bridge",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/fromWaterToWind/ecotracker-bridge/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
