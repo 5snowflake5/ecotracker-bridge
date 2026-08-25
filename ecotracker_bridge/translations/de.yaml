@@ -41,5 +41,11 @@ configuration:
   announce_ip:
     name: Angekündigte IP
     description: Leer lassen für Auto-Erkennung. Nur setzen, wenn der Pi mehrere IPs hat.
+  shelly_enabled:
+    name: Shelly Pro 3EM
+    description: Zweiten virtuellen Zähler (Gen2 RPC /rpc + mDNS _shelly._tcp) parallel bereitstellen. Gleiche Messwerte wie EcoTracker.
+  shelly_mac:
+    name: Shelly-MAC
+    description: Feste 12-stellige Hex-MAC für Hostname shellypro3em-<mac>. Nicht ändern nach dem Koppeln.
 network:
-  80/tcp: HTTP und JSON für Growatt NOAH
+  80/tcp: HTTP EcoTracker JSON und Shelly RPC für Growatt NOAH

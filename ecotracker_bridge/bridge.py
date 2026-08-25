@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Lightweight everHome EcoTracker proxy for Growatt NOAH.
+"""Lightweight everHome EcoTracker + Shelly Pro 3EM proxy for Growatt NOAH.
 
-Serves EcoTracker JSON on port 80 + mDNS `_everhome._tcp`.
-Physical meter is fetched on demand when a client (Growatt) hits `/v1/json`.
-Optional background poll: if no client has triggered /v1/json for idle_fetch_seconds,
+Serves EcoTracker JSON on port 80 + mDNS `_everhome._tcp`, and optionally
+Shelly Gen2 RPC (`/rpc/...`, `/shelly`) + mDNS `_shelly._tcp` from the same process.
+Physical meter is fetched on demand when a client hits `/v1/json` or Shelly status RPC.
+Optional background poll: if no client has triggered a live fetch for idle_fetch_seconds,
 the bridge fetches the physical EcoTracker itself so HA cache stays fresh.
 """
 
@@ -20,13 +21,16 @@ from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import URLError, HTTPError
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
+import shelly_rpc
+
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.2.2"
+VERSION = "1.3.0"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
@@ -106,6 +110,10 @@ def apply_runtime_options(opts: dict[str, Any]) -> None:
     if idle != META.get("idle_fetch_seconds"):
         LOG.info("idle_fetch_seconds geändert: %s → %.0f", META.get("idle_fetch_seconds"), idle)
         META["idle_fetch_seconds"] = idle
+    shelly_on = bool(opts.get("shelly_enabled", META.get("shelly_enabled", True)))
+    if shelly_on != META.get("shelly_enabled"):
+        LOG.info("shelly_enabled geändert: %s → %s", META.get("shelly_enabled"), shelly_on)
+        META["shelly_enabled"] = shelly_on
     MQTT.configure(opts)
 
 
@@ -456,7 +464,11 @@ def html_status(snap: dict[str, Any]) -> bytes:
     err = snap["last_error"] or "—"
     power = payload.get("power") if payload else "—"
     idle = META.get("idle_fetch_seconds", 5)
-    idle_txt = "aus" if not idle else f"nach {idle:.0f} s ohne NOAH-Trigger"
+    idle_txt = "aus" if not idle else f"nach {idle:.0f} s ohne Live-Trigger"
+    if META.get("shelly_enabled"):
+        shelly_mdns = f"<code>{META.get('shelly_hostname')}._shelly._tcp.local</code>"
+    else:
+        shelly_mdns = "aus"
     rows = ""
     if payload:
         for key, value in payload.items():
@@ -482,7 +494,7 @@ def html_status(snap: dict[str, Any]) -> bytes:
 </head>
 <body>
   <h1>EcoTracker Bridge {VERSION}</h1>
-  <p class="muted">Virtueller EcoTracker für Growatt NOAH. Live-Fetch bei jedem GET /v1/json.</p>
+  <p class="muted">Virtueller EcoTracker + optional Shelly Pro 3EM. Live-Fetch bei /v1/json und Shelly-Status-RPC.</p>
   <table>
     <tr><th>Leistung</th><td>{power} W</td></tr>
     <tr><th>Letzter erfolgreicher Abruf</th><td>{last_ok_s}</td></tr>
@@ -491,9 +503,11 @@ def html_status(snap: dict[str, Any]) -> bytes:
     <tr><th>Idle-Fetch</th><td>{idle_txt}</td></tr>
     <tr><th>Log-Level</th><td>{META.get("log_level", "info")}</td></tr>
     <tr><th>Quelle</th><td><code>{META["source_url"]}</code></td></tr>
-    <tr><th>mDNS</th><td><code>{META["hostname"]}._everhome._tcp.local</code></td></tr>
+    <tr><th>mDNS EcoTracker</th><td><code>{META["hostname"]}._everhome._tcp.local</code></td></tr>
+    <tr><th>mDNS Shelly</th><td>{shelly_mdns}</td></tr>
     <tr><th>JSON live (NOAH)</th><td><a href="/v1/json"><code>/v1/json</code></a></td></tr>
     <tr><th>JSON Cache (HA)</th><td><a href="/v1/cache"><code>/v1/cache</code></a></td></tr>
+    <tr><th>Shelly RPC</th><td><a href="/rpc/EM.GetStatus?id=0"><code>/rpc/EM.GetStatus</code></a></td></tr>
     <tr><th>Angekündigte IP</th><td>{META["announce_ip"]}:{META["port"]}</td></tr>
     <tr><th>Serial / productid</th><td>{META["serial"]} / {META["productid"]}</td></tr>
   </table>
@@ -538,8 +552,86 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_json(self, code: int, obj: Any) -> None:
+        body = json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        self._send(code, body, "application/json")
+
+    def _meter_payload_for_rpc(self, method: str, client: str) -> dict[str, Any] | None:
+        """Status-RPC: live vom physischen Tracker; Info/Config: Cache reicht."""
+        if shelly_rpc.needs_meter_payload(method):
+            source = META.get("source_url")
+            if source:
+                n, delta, avg = CLIENT_STATS.record(f"shelly:{client}")
+                if delta is None:
+                    interval_txt = "erster Hit"
+                else:
+                    avg_txt = f", Ø {avg:.1f} s" if avg is not None else ""
+                    interval_txt = f"Δ={delta:.1f} s{avg_txt}"
+                fetch_source(
+                    source,
+                    reason=f"Shelly {method} von {client} ({interval_txt})",
+                )
+                CLIENT_STATS.maybe_summary()
+        snap = STATE.snapshot()
+        payload = snap.get("payload")
+        return payload if isinstance(payload, dict) else None
+
+    def _handle_shelly_rpc(self, method: str, *, rpc_id: Any = None, src: str | None = None) -> None:
+        client = self._client()
+        if not META.get("shelly_enabled", True):
+            self._send(404, b"shelly disabled", "text/plain; charset=utf-8")
+            return
+        payload = self._meter_payload_for_rpc(method, client)
+        if shelly_rpc.needs_meter_payload(method) and payload is None:
+            LOG.warning("Shelly %s von %s → 503 (keine Meter-Daten)", method, client)
+            err = {"code": -104, "message": "no meter data yet"}
+            if rpc_id is not None:
+                self._send_json(
+                    200,
+                    {
+                        "id": rpc_id,
+                        "src": META.get("shelly_hostname"),
+                        "dst": src,
+                        "error": err,
+                    },
+                )
+            else:
+                self._send_json(503, {"error": "noch keine Daten vom physischen EcoTracker"})
+            return
+        result = shelly_rpc.dispatch_rpc(method, payload, META)
+        if result is None:
+            LOG.warning("Shelly unbekannte Methode %s von %s", method, client)
+            err = {"code": -114, "message": f"Method '{method}' not found"}
+            if rpc_id is not None:
+                self._send_json(
+                    200,
+                    {
+                        "id": rpc_id,
+                        "src": META.get("shelly_hostname"),
+                        "dst": src,
+                        "error": err,
+                    },
+                )
+            else:
+                self._send_json(404, err)
+            return
+        power = (payload or {}).get("power") if payload else None
+        LOG.debug("Shelly %s von %s → 200 power=%s W", method, client, power)
+        if rpc_id is not None:
+            frame: dict[str, Any] = {
+                "id": rpc_id,
+                "src": META.get("shelly_hostname"),
+                "result": result,
+            }
+            if src:
+                frame["dst"] = src
+            self._send_json(200, frame)
+        else:
+            self._send_json(200, result)
+
     def do_GET(self) -> None:  # noqa: N802
-        path = self.path.split("?", 1)[0]
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
         client = self._client()
         if path in ("/v1/json", "/v1/json/"):
             n, delta, avg = CLIENT_STATS.record(client)
@@ -592,6 +684,14 @@ class Handler(BaseHTTPRequestHandler):
             )
             self._send(200, body, "application/json")
             return
+        if path in ("/shelly", "/shelly/"):
+            self._handle_shelly_rpc("Shelly.GetDeviceInfo")
+            return
+        if path.startswith("/rpc/"):
+            method = path[len("/rpc/") :].strip("/")
+            if method:
+                self._handle_shelly_rpc(method)
+                return
         if path in ("/", "/index.html"):
             # Statusseite nur Cache – sonst würde meta refresh den physischen Tracker killen.
             snap = STATE.snapshot()
@@ -601,8 +701,36 @@ class Handler(BaseHTTPRequestHandler):
         LOG.warning("GET %s von %s → 404", path, client)
         self._send(404, b"not found", "text/plain; charset=utf-8")
 
+    def do_POST(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        client = self._client()
+        if path not in ("/rpc", "/rpc/"):
+            LOG.warning("POST %s von %s → 404", path, client)
+            self._send(404, b"not found", "text/plain; charset=utf-8")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length > 0 else b"{}"
+        try:
+            req = json.loads(raw.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            LOG.warning("POST /rpc von %s → ungültiges JSON: %s", client, exc)
+            self._send_json(400, {"error": "invalid json"})
+            return
+        if not isinstance(req, dict):
+            self._send_json(400, {"error": "rpc body must be object"})
+            return
+        method = str(req.get("method") or "")
+        if not method:
+            self._send_json(400, {"error": "missing method"})
+            return
+        rpc_id = req.get("id", 0)
+        src = req.get("src")
+        self._handle_shelly_rpc(method, rpc_id=rpc_id, src=str(src) if src else None)
 
-def register_mdns(hostname: str, ip: str, port: int, serial: str, productid: str) -> tuple[Zeroconf, ServiceInfo]:
+
+def register_mdns(hostname: str, ip: str, port: int, serial: str, productid: str) -> tuple[Zeroconf, list[ServiceInfo]]:
+    infos: list[ServiceInfo] = []
     service_type = "_everhome._tcp.local."
     info = ServiceInfo(
         service_type,
@@ -618,15 +746,35 @@ def register_mdns(hostname: str, ip: str, port: int, serial: str, productid: str
     )
     zc = Zeroconf(ip_version=IPVersion.V4Only)
     zc.register_service(info, cooperating_responders=True)
+    infos.append(info)
     LOG.info(
-        "mDNS registriert: %s._everhome._tcp.local → %s:%s (serial=%s productid=%s)",
+        "mDNS EcoTracker: %s._everhome._tcp.local → %s:%s (serial=%s productid=%s)",
         hostname,
         ip,
         port,
         serial,
         productid,
     )
-    return zc, info
+    return zc, infos
+
+
+def register_shelly_mdns(zc: Zeroconf, hostname: str, ip: str, port: int) -> list[ServiceInfo]:
+    """Shelly Gen2: _shelly._tcp (+ _http._tcp wie uni-meter)."""
+    infos: list[ServiceInfo] = []
+    props = shelly_rpc.mdns_properties(hostname)
+    for service_type in ("_shelly._tcp.local.", "_http._tcp.local."):
+        info = ServiceInfo(
+            service_type,
+            f"{hostname}.{service_type}",
+            addresses=[socket.inet_aton(ip)],
+            port=port,
+            properties=props,
+            server=f"{hostname}.local.",
+        )
+        zc.register_service(info, cooperating_responders=True)
+        infos.append(info)
+        LOG.info("mDNS Shelly: %s.%s → %s:%s", hostname, service_type.rstrip("."), ip, port)
+    return infos
 
 
 def main() -> None:
@@ -647,6 +795,9 @@ def main() -> None:
     setup_logging(log_level)
     source = source_json_url(str(opts["source_url"]))
     announce_ip = str(opts.get("announce_ip") or "").strip() or detect_ipv4()
+    shelly_enabled = bool(opts.get("shelly_enabled", True))
+    shelly_mac = normalize_mac(str(opts.get("shelly_mac", "C8C9A3B43A45")))
+    shelly_hostname = f"shellypro3em-{shelly_mac.lower()}"
 
     META.update(
         {
@@ -659,6 +810,10 @@ def main() -> None:
             "idle_fetch_seconds": idle_fetch_seconds,
             "log_level": log_level,
             "version": VERSION,
+            "shelly_enabled": shelly_enabled,
+            "shelly_mac": shelly_mac,
+            "shelly_hostname": shelly_hostname,
+            "default_voltage": 230.0,
         }
     )
 
@@ -667,13 +822,17 @@ def main() -> None:
     LOG.info("mDNS-Announce: %s (%s)", announce_ip, hostname)
     if idle_fetch_seconds > 0:
         LOG.info(
-            "Idle-Fetch:    nach %.0f s ohne /v1/json-Trigger (NOAH ~3 s → meist unnötig)",
+            "Idle-Fetch:    nach %.0f s ohne Live-Trigger (NOAH/Shelly ~3 s → meist unnötig)",
             idle_fetch_seconds,
         )
     else:
         LOG.info("Idle-Fetch:    aus")
     LOG.info("Log-Level:     %s", log_level.upper())
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
+    if shelly_enabled:
+        LOG.info("Shelly Pro 3EM: an → %s (MAC %s)", shelly_hostname, shelly_mac)
+    else:
+        LOG.info("Shelly Pro 3EM: aus")
 
     MQTT.configure(opts)
     if bool(opts.get("mqtt_enabled", True)):
@@ -689,7 +848,9 @@ def main() -> None:
 
     zc = None
     try:
-        zc, _info = register_mdns(hostname, announce_ip, port, serial, productid)
+        zc, _infos = register_mdns(hostname, announce_ip, port, serial, productid)
+        if shelly_enabled:
+            register_shelly_mdns(zc, shelly_hostname, announce_ip, port)
     except Exception as exc:
         LOG.error("mDNS fehlgeschlagen: %s", exc)
         LOG.error("HTTP läuft trotzdem. Growatt NOAH findet den Zähler ohne mDNS nicht.")
@@ -700,7 +861,10 @@ def main() -> None:
         LOG.error("HTTP-Server startet nicht auf Port %s: %s", port, exc)
         raise SystemExit(1) from exc
 
-    LOG.info("HTTP bereit auf Port %s (Status: /  JSON: /v1/json)", port)
+    LOG.info(
+        "HTTP bereit auf Port %s (EcoTracker: /v1/json  Shelly: /rpc/EM.GetStatus)",
+        port,
+    )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
