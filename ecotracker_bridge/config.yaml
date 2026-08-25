@@ -1,9 +1,10 @@
 name: EcoTracker Bridge
-version: "1.1.1"
+version: "1.2.0"
 slug: ecotracker_bridge
 description: >-
   Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen
   EcoTracker aus (HTTP Port 80 + mDNS _everhome._tcp) für Growatt NOAH.
+  Optional MQTT Home Assistant Discovery für Sensoren.
 url: https://github.com/5snowflake5/ecotracker-bridge
 arch:
   - aarch64
@@ -12,10 +13,18 @@ init: false
 startup: services
 boot: auto
 host_network: true
+services:
+  - mqtt:want
 options:
   source_url: "http://192.168.55.140"
   idle_fetch_seconds: 5
   log_level: info
+  mqtt_enabled: true
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
+  mqtt_discovery_prefix: homeassistant
   port: 80
   mac: "B43A45A1B2C3"
   serial: "293d45273261"
@@ -25,6 +34,12 @@ schema:
   source_url: str
   idle_fetch_seconds: int(0,60)
   log_level: list(info|debug)
+  mqtt_enabled: bool
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_user: str
+  mqtt_password: password
+  mqtt_discovery_prefix: str
   port: port
   mac: str
   serial: str

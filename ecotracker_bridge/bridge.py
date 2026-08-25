@@ -26,7 +26,7 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
@@ -106,6 +106,7 @@ def apply_runtime_options(opts: dict[str, Any]) -> None:
     if idle != META.get("idle_fetch_seconds"):
         LOG.info("idle_fetch_seconds geändert: %s → %.0f", META.get("idle_fetch_seconds"), idle)
         META["idle_fetch_seconds"] = idle
+    MQTT.configure(opts)
 
 
 def load_options() -> dict[str, Any]:
@@ -215,6 +216,159 @@ class ClientPollStats:
 
 CLIENT_STATS = ClientPollStats()
 
+# HA MQTT Discovery – Sensoren erscheinen über die App, ohne HACS-Integration.
+MQTT_SENSOR_DEFS: list[tuple[str, str, str, str, str]] = [
+    ("power", "Leistung", "W", "power", "measurement"),
+    ("powerAvg", "Leistung Mittelwert", "W", "power", "measurement"),
+    ("powerPhase1", "Leistung Phase 1", "W", "power", "measurement"),
+    ("powerPhase2", "Leistung Phase 2", "W", "power", "measurement"),
+    ("powerPhase3", "Leistung Phase 3", "W", "power", "measurement"),
+    ("energyCounterIn", "Energie Bezug", "Wh", "energy", "total_increasing"),
+    ("energyCounterInT1", "Energie Bezug T1", "Wh", "energy", "total_increasing"),
+    ("energyCounterInT2", "Energie Bezug T2", "Wh", "energy", "total_increasing"),
+    ("energyCounterOut", "Energie Einspeisung", "Wh", "energy", "total_increasing"),
+]
+
+
+class MqttHaPublisher:
+    """Veröffentlicht Cache-Werte per MQTT Home Assistant Discovery."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.client = None
+        self.enabled = False
+        self.host = "core-mosquitto"
+        self.port = 1883
+        self.username = ""
+        self.password = ""
+        self.prefix = "homeassistant"
+        self.device_id = "ecotracker_bridge"
+        self._discovery_done = False
+        self._last_error = ""
+
+    def configure(self, opts: dict[str, Any]) -> None:
+        enabled = bool(opts.get("mqtt_enabled", True))
+        host = str(opts.get("mqtt_host") or "core-mosquitto").strip()
+        port = int(opts.get("mqtt_port") or 1883)
+        username = str(opts.get("mqtt_user") or "")
+        password = str(opts.get("mqtt_password") or "")
+        prefix = str(opts.get("mqtt_discovery_prefix") or "homeassistant").strip() or "homeassistant"
+        changed = (
+            enabled != self.enabled
+            or host != self.host
+            or port != self.port
+            or username != self.username
+            or password != self.password
+            or prefix != self.prefix
+        )
+        self.enabled = enabled
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.prefix = prefix
+        if not enabled:
+            self._disconnect()
+            return
+        if changed or self.client is None:
+            self._connect()
+
+    def _disconnect(self) -> None:
+        with self.lock:
+            if self.client is not None:
+                try:
+                    self.client.loop_stop()
+                    self.client.disconnect()
+                except Exception:
+                    pass
+                self.client = None
+            self._discovery_done = False
+
+    def _connect(self) -> None:
+        self._disconnect()
+        try:
+            import paho.mqtt.client as mqtt
+        except ImportError:
+            LOG.error("MQTT: paho-mqtt nicht installiert")
+            return
+        client = mqtt.Client(client_id=f"ecotracker-bridge-{os.getpid()}")
+        if self.username:
+            client.username_pw_set(self.username, self.password or None)
+
+        def on_connect(client, userdata, flags, rc, properties=None):  # noqa: ARG001
+            if rc == 0:
+                LOG.info("MQTT verbunden: %s:%s", self.host, self.port)
+                self._discovery_done = False
+                self.publish_discovery()
+                snap = STATE.snapshot()
+                if snap.get("payload"):
+                    self.publish_state(snap["payload"])
+            else:
+                LOG.error("MQTT connect rc=%s (%s:%s)", rc, self.host, self.port)
+
+        client.on_connect = on_connect
+        try:
+            client.connect_async(self.host, self.port, keepalive=60)
+            client.loop_start()
+            with self.lock:
+                self.client = client
+            self._last_error = ""
+        except Exception as exc:
+            self._last_error = str(exc)
+            LOG.error("MQTT Verbindung fehlgeschlagen (%s:%s): %s", self.host, self.port, exc)
+
+    def publish_discovery(self) -> None:
+        with self.lock:
+            client = self.client
+            if client is None or not self.enabled:
+                return
+            device = {
+                "identifiers": [self.device_id],
+                "name": "EcoTracker Bridge",
+                "manufacturer": "ecotracker-bridge",
+                "model": "everHome EcoTracker Proxy",
+                "sw_version": VERSION,
+            }
+            state_topic = f"{self.device_id}/state"
+            avail_topic = f"{self.device_id}/status"
+            for json_key, name, unit, device_class, state_class in MQTT_SENSOR_DEFS:
+                uid = f"{self.device_id}_{json_key}"
+                cfg = {
+                    "name": name,
+                    "unique_id": uid,
+                    "state_topic": state_topic,
+                    "availability_topic": avail_topic,
+                    "payload_available": "online",
+                    "payload_not_available": "offline",
+                    "value_template": f"{{{{ value_json.{json_key} }}}}",
+                    "unit_of_measurement": unit,
+                    "device_class": device_class,
+                    "state_class": state_class,
+                    "device": device,
+                }
+                topic = f"{self.prefix}/sensor/{self.device_id}/{json_key}/config"
+                client.publish(topic, json.dumps(cfg), retain=True)
+            client.publish(avail_topic, "online", retain=True)
+            self._discovery_done = True
+            LOG.info("MQTT HA-Discovery veröffentlicht (%s Sensoren)", len(MQTT_SENSOR_DEFS))
+
+    def publish_state(self, payload: dict[str, Any]) -> None:
+        with self.lock:
+            client = self.client
+            if client is None or not self.enabled:
+                return
+            if not self._discovery_done:
+                # connect-callback macht Discovery; hier nur State
+                pass
+            body = {k: payload.get(k) for k, *_ in MQTT_SENSOR_DEFS if k in payload}
+            if not body:
+                return
+            client.publish(f"{self.device_id}/state", json.dumps(body), retain=True)
+            LOG.debug("MQTT State: power=%s", body.get("power"))
+
+
+MQTT = MqttHaPublisher()
+
 
 def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
     """Holt frisch vom physischen EcoTracker und aktualisiert den Cache."""
@@ -243,6 +397,7 @@ def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
             data.get("powerAvg"),
             elapsed_ms,
         )
+        MQTT.publish_state(data)
         return data
     except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -518,6 +673,16 @@ def main() -> None:
     LOG.info("Log-Level:     %s", log_level.upper())
     LOG.info("MAC/Serial:    %s / %s / productid=%s", mac, serial, productid)
 
+    MQTT.configure(opts)
+    if bool(opts.get("mqtt_enabled", True)):
+        LOG.info(
+            "MQTT Sensoren: an → %s:%s (Discovery unter homeassistant/)",
+            opts.get("mqtt_host") or "core-mosquitto",
+            opts.get("mqtt_port") or 1883,
+        )
+    else:
+        LOG.info("MQTT Sensoren: aus")
+
     threading.Thread(target=poll_loop, daemon=True, name="poll").start()
 
     zc = None
@@ -543,6 +708,7 @@ def main() -> None:
         if zc is not None:
             zc.unregister_all_services()
             zc.close()
+        MQTT._disconnect()
         LOG.info("EcoTracker Bridge beendet")
 
 

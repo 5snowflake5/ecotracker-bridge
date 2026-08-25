@@ -8,6 +8,24 @@ configuration:
   log_level:
     name: Log-Level
     description: info = ruhig, debug = jeden GET inkl. Intervall Δ
+  mqtt_enabled:
+    name: MQTT-Sensoren
+    description: Sensoren per Home Assistant MQTT Discovery anlegen (Mosquitto nötig)
+  mqtt_host:
+    name: MQTT-Host
+    description: Meist core-mosquitto
+  mqtt_port:
+    name: MQTT-Port
+    description: "1883"
+  mqtt_user:
+    name: MQTT-User
+    description: Leer lassen, wenn der Broker ohne Login erlaubt
+  mqtt_password:
+    name: MQTT-Passwort
+    description: Optional
+  mqtt_discovery_prefix:
+    name: Discovery-Prefix
+    description: homeassistant
   port:
     name: HTTP-Port
     description: Growatt NOAH erwartet 80

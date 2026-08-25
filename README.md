@@ -21,14 +21,21 @@ Nur `/v1/json` (NOAH) oder der Idle-Watchdog (>5 s ohne Trigger) rufen die Har
 3. `source_url` = `http://192.168.55.140`
 4. ShinePhone → `ecotracker-b43a45a1b2c3`
 
-## Integration (Sensoren)
+## Sensoren über die App (MQTT)
 
-1. HACS → Custom repo (Integration): dieselbe GitHub-URL  
-2. **EcoTracker Local** installieren, HA neu starten  
-3. Integration hinzufügen, Host = **Bridge/Pi** `192.168.55.151` (nicht `.140`)  
-4. Intervall z. B. 5 s (trifft nur `/v1/cache`)
+Kein HACS nötig. Voraussetzung: **Mosquitto**-App + MQTT-Integration in HA.
 
-Sensoren: Leistung, Mittelwert, Phasen, Energie Bezug/Einspeisung.
+1. Bridge auf **1.2.0** updaten
+2. In der Bridge-Config: `mqtt_enabled: true`, Host `core-mosquitto`
+3. User/Pass nur setzen, wenn dein Mosquitto das verlangt
+4. Bridge starten → im Log: `MQTT verbunden` und `MQTT HA-Discovery veröffentlicht`
+5. Unter **Einstellungen → Geräte & Dienste** erscheint Gerät **EcoTracker Bridge** mit Sensoren
+
+Die Werte kommen aus denselben Abrufen wie NOAH (kein Extra-Poll auf die Hardware).
+
+## Integration (optional, ohne MQTT)
+
+HACS **EcoTracker Local** gegen Bridge-`/v1/cache` – nur nötig, wenn du kein MQTT willst.
 
 ## Endpunkte
 
