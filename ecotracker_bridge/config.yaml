@@ -1,0 +1,31 @@
+name: EcoTracker Bridge
+version: "1.0.0"
+slug: ecotracker_bridge
+description: >-
+  Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen
+  EcoTracker aus (HTTP Port 80 + mDNS _everhome._tcp) für Growatt NOAH.
+url: https://github.com/5snowflake5/ecotracker-bridge
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+startup: services
+boot: auto
+host_network: true
+options:
+  source_url: "http://192.168.55.140"
+  poll_seconds: 1
+  port: 80
+  mac: "B43A45A1B2C3"
+  serial: "293d45273261"
+  productid: "1137"
+  announce_ip: ""
+schema:
+  source_url: str
+  poll_seconds: int(1,10)
+  port: port
+  mac: str
+  serial: str
+  productid: str
+  announce_ip: str

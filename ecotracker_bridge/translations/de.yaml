@@ -1,0 +1,24 @@
+configuration:
+  source_url:
+    name: EcoTracker-Adresse
+    description: IP oder URL des physischen EcoTrackers, ohne /v1/json
+  poll_seconds:
+    name: Poll-Intervall
+    description: Sekunden zwischen zwei Abfragen des physischen Zählers
+  port:
+    name: HTTP-Port
+    description: Growatt NOAH erwartet 80
+  mac:
+    name: MAC
+    description: Feste 12-stellige Hex-MAC für Hostname ecotracker-<mac>. Nicht ändern nach dem Koppeln.
+  serial:
+    name: Serial
+    description: mDNS-TXT serial (Default wie uni-meter)
+  productid:
+    name: Product ID
+    description: "1137 = EcoTracker IR"
+  announce_ip:
+    name: Angekündigte IP
+    description: Leer lassen für Auto-Erkennung. Nur setzen, wenn der Pi mehrere IPs hat.
+network:
+  80/tcp: HTTP und JSON für Growatt NOAH
