@@ -26,7 +26,7 @@ from zeroconf import IPVersion, ServiceInfo, Zeroconf
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 LOG = logging.getLogger("ecotracker-bridge")
 
@@ -216,17 +216,19 @@ class ClientPollStats:
 
 CLIENT_STATS = ClientPollStats()
 
-# HA MQTT Discovery – Sensoren erscheinen über die App, ohne HACS-Integration.
-MQTT_SENSOR_DEFS: list[tuple[str, str, str, str, str]] = [
-    ("power", "Leistung", "W", "power", "measurement"),
-    ("powerAvg", "Leistung Mittelwert", "W", "power", "measurement"),
-    ("powerPhase1", "Leistung Phase 1", "W", "power", "measurement"),
-    ("powerPhase2", "Leistung Phase 2", "W", "power", "measurement"),
-    ("powerPhase3", "Leistung Phase 3", "W", "power", "measurement"),
-    ("energyCounterIn", "Energie Bezug", "Wh", "energy", "total_increasing"),
-    ("energyCounterInT1", "Energie Bezug T1", "Wh", "energy", "total_increasing"),
-    ("energyCounterInT2", "Energie Bezug T2", "Wh", "energy", "total_increasing"),
-    ("energyCounterOut", "Energie Einspeisung", "Wh", "energy", "total_increasing"),
+# HA MQTT Discovery – Namen wie stefanseeger/ecotracker (everHome Plugin).
+# (json_key, name, object_id_suffix, unit, device_class|None, state_class)
+MQTT_SENSOR_DEFS: list[tuple[str, str, str, str, str | None, str]] = [
+    ("power", "Power", "power", "W", "power", "measurement"),
+    ("powerAvg", "Power average (last minute)", "power_average", "W", "power", "measurement"),
+    ("powerPhase1", "Power phase 1", "power_phase_1", "W", "power", "measurement"),
+    ("powerPhase2", "Power phase 2", "power_phase_2", "W", "power", "measurement"),
+    ("powerPhase3", "Power phase 3", "power_phase_3", "W", "power", "measurement"),
+    ("energyCounterIn", "Total grid import", "energy_in", "Wh", "energy", "total_increasing"),
+    ("energyCounterInT1", "Grid import (1.8.1)", "energy_in_t1", "Wh", "energy", "total_increasing"),
+    ("energyCounterInT2", "Grid import (1.8.2)", "energy_in_t2", "Wh", "energy", "total_increasing"),
+    ("energyCounterOut", "Total grid export", "energy_out", "Wh", "energy", "total_increasing"),
+    ("agePower", "Milliseconds since last measurement", "age_power", "ms", None, "measurement"),
 ]
 
 
@@ -242,7 +244,7 @@ class MqttHaPublisher:
         self.username = ""
         self.password = ""
         self.prefix = "homeassistant"
-        self.device_id = "ecotracker_bridge"
+        self.device_id = "ecotracker"
         self._discovery_done = False
         self._last_error = ""
 
@@ -323,18 +325,19 @@ class MqttHaPublisher:
             if client is None or not self.enabled:
                 return
             device = {
-                "identifiers": [self.device_id],
-                "name": "EcoTracker Bridge",
-                "manufacturer": "ecotracker-bridge",
-                "model": "everHome EcoTracker Proxy",
+                "identifiers": ["ecotracker_bridge"],
+                "name": "Ecotracker",
+                "manufacturer": "everHome",
+                "model": "EcoTracker (via Bridge)",
                 "sw_version": VERSION,
             }
-            state_topic = f"{self.device_id}/state"
-            avail_topic = f"{self.device_id}/status"
-            for json_key, name, unit, device_class, state_class in MQTT_SENSOR_DEFS:
-                uid = f"{self.device_id}_{json_key}"
-                cfg = {
+            state_topic = f"ecotracker_bridge/state"
+            avail_topic = f"ecotracker_bridge/status"
+            for json_key, name, object_suffix, unit, device_class, state_class in MQTT_SENSOR_DEFS:
+                uid = f"ecotracker_bridge_{object_suffix}"
+                cfg: dict[str, Any] = {
                     "name": name,
+                    "object_id": f"ecotracker_{object_suffix}",
                     "unique_id": uid,
                     "state_topic": state_topic,
                     "availability_topic": avail_topic,
@@ -342,28 +345,27 @@ class MqttHaPublisher:
                     "payload_not_available": "offline",
                     "value_template": f"{{{{ value_json.{json_key} }}}}",
                     "unit_of_measurement": unit,
-                    "device_class": device_class,
                     "state_class": state_class,
                     "device": device,
+                    "force_update": True,
                 }
-                topic = f"{self.prefix}/sensor/{self.device_id}/{json_key}/config"
+                if device_class:
+                    cfg["device_class"] = device_class
+                topic = f"{self.prefix}/sensor/ecotracker_bridge/{object_suffix}/config"
                 client.publish(topic, json.dumps(cfg), retain=True)
             client.publish(avail_topic, "online", retain=True)
             self._discovery_done = True
-            LOG.info("MQTT HA-Discovery veröffentlicht (%s Sensoren)", len(MQTT_SENSOR_DEFS))
+            LOG.info("MQTT HA-Discovery veröffentlicht (%s Sensoren, Namen wie Ecotracker-Plugin)", len(MQTT_SENSOR_DEFS))
 
     def publish_state(self, payload: dict[str, Any]) -> None:
         with self.lock:
             client = self.client
             if client is None or not self.enabled:
                 return
-            if not self._discovery_done:
-                # connect-callback macht Discovery; hier nur State
-                pass
-            body = {k: payload.get(k) for k, *_ in MQTT_SENSOR_DEFS if k in payload}
+            body = {k: payload.get(k) for k, *_ in MQTT_SENSOR_DEFS if k in payload and payload.get(k) is not None}
             if not body:
                 return
-            client.publish(f"{self.device_id}/state", json.dumps(body), retain=True)
+            client.publish("ecotracker_bridge/state", json.dumps(body), retain=True)
             LOG.debug("MQTT State: power=%s", body.get("power"))
 
 
