@@ -1,5 +1,5 @@
 name: EcoTracker Bridge
-version: "1.0.2"
+version: "1.0.3"
 slug: ecotracker_bridge
 description: >-
   Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen
