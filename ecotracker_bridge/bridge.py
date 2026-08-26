@@ -30,7 +30,7 @@ import shelly_rpc
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 # Shelly/NOAH pollen ~alle 3 s – physischen Tracker nicht jedes Mal neu anfassen.
 MIN_SOURCE_REFETCH_S = 2.0
 SOURCE_TIMEOUT_S = 4.0
@@ -252,11 +252,12 @@ MQTT_SENSOR_DEFS: list[tuple[str, str, str, str, str | None, str]] = [
     ("powerPhase2", "Power phase 2", "power_phase_2", "W", "power", "measurement"),
     ("powerPhase3", "Power phase 3", "power_phase_3", "W", "power", "measurement"),
     ("energyCounterIn", "Total grid import", "energy_in", "Wh", "energy", "total_increasing"),
-    ("energyCounterInT1", "Grid import (1.8.1)", "energy_in_t1", "Wh", "energy", "total_increasing"),
-    ("energyCounterInT2", "Grid import (1.8.2)", "energy_in_t2", "Wh", "energy", "total_increasing"),
     ("energyCounterOut", "Total grid export", "energy_out", "Wh", "energy", "total_increasing"),
     ("agePower", "Milliseconds since last measurement", "age_power", "ms", None, "measurement"),
 ]
+
+# Alte Discovery-Topics (Tarifzähler – viele Meter liefern die Felder nicht → HA-Log-Spam)
+_MQTT_STALE_OBJECT_SUFFIXES = ("energy_in_t1", "energy_in_t2")
 
 
 class MqttHaPublisher:
@@ -360,6 +361,9 @@ class MqttHaPublisher:
             }
             state_topic = f"ecotracker_bridge/state"
             avail_topic = f"ecotracker_bridge/status"
+            for stale in _MQTT_STALE_OBJECT_SUFFIXES:
+                topic = f"{self.prefix}/sensor/ecotracker_bridge/{stale}/config"
+                client.publish(topic, "", retain=True)
             for json_key, name, object_suffix, unit, device_class, state_class in MQTT_SENSOR_DEFS:
                 uid = f"ecotracker_bridge_{object_suffix}"
                 cfg: dict[str, Any] = {
@@ -370,7 +374,10 @@ class MqttHaPublisher:
                     "availability_topic": avail_topic,
                     "payload_available": "online",
                     "payload_not_available": "offline",
-                    "value_template": f"{{{{ value_json.{json_key} }}}}",
+                    # default(none) → kein Template-Spam wenn Feld fehlt; State wird unavailable
+                    "value_template": (
+                        f"{{{{ value_json.{json_key} | default(none, true) }}}}"
+                    ),
                     "unit_of_measurement": unit,
                     "state_class": state_class,
                     "device": device,
