@@ -1,0 +1,183 @@
+# NOAH-Bilanz aus SoC + Solar + WR-Abgabe
+#
+# Kapazität: 4096 Wh = 100 % SoC
+#
+# S0  = Batterie-Wh vor erster Solarproduktion (heute)
+# X   = Solarproduktion heute (Wh)
+# Y   = WR-Abgabe ins Haus heute (Wh)  [= Netto-Abgabe]
+# S1  = Batterie-Wh jetzt
+# S2  = (S0 + X) - Y     theoretischer Batterieinhalt ohne Verluste
+# Z   = S2 - S1          Bilanzlücke (Verluste / Messfehler / Eigenverbrauch der Anlage)
+#
+# Hinweis: Z ist NICHT der klassische Haus-Eigenverbrauch.
+#          Y ist bereits die Energie, die der WR ins Haus gegeben hat.
+#
+# --- Einrichtung ---
+# 1) Entity-IDs unten prüfen (NOAH-Serial 0PVP00ED26UT03E9).
+# 2) Nach /config/packages/noah_bilanz.yaml kopieren
+# 3) configuration.yaml: homeassistant.packages: !include_dir_named packages
+# 4) Neustart
+# 5) Helfer „Integral“ falls noch nicht vorhanden:
+#      Quelle: sensor.0pvp00ed26ut03e9_output_power
+#      Name: NOAH WR Abgabe Energie
+#      Präfix: k  → ergibt kWh (wir rechnen intern in Wh um)
+#    ODER den Riemann-Sensor unten nutzen (platform integration).
+# 6) Automation „S0 setzen“ einmal anlegen (siehe Ende der Datei) ODER
+#    input_number.noah_s0_wh manuell/morgens setzen.
+
+input_number:
+  noah_kapazitaet_wh:
+    name: NOAH Kapazität
+    min: 1000
+    max: 20000
+    step: 1
+    mode: box
+    unit_of_measurement: Wh
+    initial: 4096
+    icon: mdi:battery-high
+
+  noah_s0_wh:
+    name: NOAH S0 Batterie vor Solar (heute)
+    min: 0
+    max: 20000
+    step: 1
+    mode: box
+    unit_of_measurement: Wh
+    initial: 0
+    icon: mdi:battery-clock
+
+input_boolean:
+  noah_s0_gesetzt_heute:
+    name: NOAH S0 heute gesetzt
+    icon: mdi:check-circle
+
+# WR-Abgabe als Energie (kWh), falls noch kein Integral existiert.
+# Wenn du den Helfer schon hast: diesen Block löschen und unten
+# sensor.noah_wr_abgabe_energie auf deinen Helfer umbiegen.
+sensor:
+  - platform: integration
+    source: sensor.0pvp00ed26ut03e9_output_power
+    name: "NOAH WR Abgabe Energie"
+    unique_id: noah_wr_abgabe_energie_riemann
+    unit_prefix: k
+    round: 3
+    method: left
+
+utility_meter:
+  noah_wr_abgabe_heute:
+    source: sensor.noah_wr_abgabe_energie
+    name: "NOAH WR Abgabe heute"
+    cycle: daily
+
+template:
+  - sensor:
+      - name: "NOAH Batterie Wh"
+        unique_id: noah_batterie_wh
+        unit_of_measurement: "Wh"
+        device_class: energy
+        state_class: measurement
+        icon: mdi:battery
+        state: >-
+          {% set soc = states('sensor.0pvp00ed26ut03e9_soc') | float(0) %}
+          {% set cap = states('input_number.noah_kapazitaet_wh') | float(4096) %}
+          {{ (soc / 100 * cap) | round(0) }}
+        availability: "{{ states('sensor.0pvp00ed26ut03e9_soc') | is_number }}"
+
+      - name: "NOAH Solar heute Wh"
+        unique_id: noah_solar_heute_wh
+        unit_of_measurement: "Wh"
+        device_class: energy
+        state_class: total
+        icon: mdi:solar-power
+        state: >-
+          {{ (states('sensor.0pvp00ed26ut03e9_generation_today') | float(0) * 1000) | round(0) }}
+        availability: "{{ states('sensor.0pvp00ed26ut03e9_generation_today') | is_number }}"
+
+      - name: "NOAH WR Abgabe heute Wh"
+        unique_id: noah_wr_abgabe_heute_wh
+        unit_of_measurement: "Wh"
+        device_class: energy
+        state_class: total
+        icon: mdi:transmission-tower-export
+        state: >-
+          {{ (states('sensor.noah_wr_abgabe_heute') | float(0) * 1000) | round(0) }}
+        availability: "{{ states('sensor.noah_wr_abgabe_heute') | is_number }}"
+
+      # S2 = (S0 + X) - Y
+      - name: "NOAH S2 theoretisch Wh"
+        unique_id: noah_s2_theoretisch_wh
+        unit_of_measurement: "Wh"
+        device_class: energy
+        state_class: measurement
+        icon: mdi:battery-sync
+        state: >-
+          {% set s0 = states('input_number.noah_s0_wh') | float(0) %}
+          {% set x = states('sensor.noah_solar_heute_wh') | float(0) %}
+          {% set y = states('sensor.noah_wr_abgabe_heute_wh') | float(0) %}
+          {{ (s0 + x - y) | round(0) }}
+
+      # S1
+      - name: "NOAH S1 jetzt Wh"
+        unique_id: noah_s1_jetzt_wh
+        unit_of_measurement: "Wh"
+        device_class: energy
+        state_class: measurement
+        icon: mdi:battery
+        state: "{{ states('sensor.noah_batterie_wh') }}"
+        availability: "{{ states('sensor.noah_batterie_wh') | is_number }}"
+
+      # Z = S2 - S1  (Bilanzlücke / Verluste)
+      - name: "NOAH Bilanzlücke Z Wh"
+        unique_id: noah_bilanzluecke_z_wh
+        unit_of_measurement: "Wh"
+        device_class: energy
+        state_class: measurement
+        icon: mdi:flash-alert
+        state: >-
+          {% set s2 = states('sensor.noah_s2_theoretisch_wh') | float(0) %}
+          {% set s1 = states('sensor.noah_s1_jetzt_wh') | float(0) %}
+          {{ (s2 - s1) | round(0) }}
+
+      - name: "NOAH Bilanzlücke Z Prozent von Solar"
+        unique_id: noah_bilanzluecke_z_pct
+        unit_of_measurement: "%"
+        icon: mdi:percent
+        state: >-
+          {% set z = states('sensor.noah_bilanzluecke_z_wh') | float(0) %}
+          {% set x = states('sensor.noah_solar_heute_wh') | float(0) %}
+          {{ ((z / x * 100) if x > 0 else 0) | round(1) }}
+
+# Automation: S0 einmal täglich bei erster Solarproduktion setzen.
+# In Automationen UI anlegen ODER unter automation: einbinden.
+#
+# automation:
+#   - id: noah_s0_bei_erstem_solar
+#     alias: NOAH S0 bei erstem Solar setzen
+#     mode: single
+#     trigger:
+#       - platform: numeric_state
+#         entity_id: sensor.0pvp00ed26ut03e9_solar_power
+#         above: 20
+#     condition:
+#       - condition: state
+#         entity_id: input_boolean.noah_s0_gesetzt_heute
+#         state: "off"
+#     action:
+#       - service: input_number.set_value
+#         target:
+#           entity_id: input_number.noah_s0_wh
+#         data:
+#           value: "{{ states('sensor.noah_batterie_wh') | float(0) }}"
+#       - service: input_boolean.turn_on
+#         target:
+#           entity_id: input_boolean.noah_s0_gesetzt_heute
+#
+#   - id: noah_s0_reset_mitternacht
+#     alias: NOAH S0 Flag Reset Mitternacht
+#     trigger:
+#       - platform: time
+#         at: "00:00:05"
+#     action:
+#       - service: input_boolean.turn_off
+#         target:
+#           entity_id: input_boolean.noah_s0_gesetzt_heute

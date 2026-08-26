@@ -1,0 +1,93 @@
+# Package: stabile Alias-Sensoren für das NOAH-Board.
+# Einmal die REPLACE_*-Zeilen auf deine echten noah-mqtt Entity-IDs setzen.
+#
+# Nach Änderung: Entwicklerwerkzeuge → YAML prüfen → Neustart (oder Template neu laden).
+
+template:
+  - sensor:
+      - name: "NOAH Solarleistung"
+        unique_id: noah_board_solar_w
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        state: "{{ states('sensor.REPLACE_SERIAL_solar_power') | float(0) }}"
+        availability: "{{ states('sensor.REPLACE_SERIAL_solar_power') | is_number }}"
+
+      - name: "NOAH Ladeleistung"
+        unique_id: noah_board_charge_w
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:battery-plus
+        state: "{{ states('sensor.REPLACE_SERIAL_charging_power') | float(0) }}"
+        availability: "{{ states('sensor.REPLACE_SERIAL_charging_power') | is_number }}"
+
+      - name: "NOAH Entladeleistung"
+        unique_id: noah_board_discharge_w
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:battery-minus
+        state: "{{ states('sensor.REPLACE_SERIAL_discharge_power') | float(0) }}"
+        availability: "{{ states('sensor.REPLACE_SERIAL_discharge_power') | is_number }}"
+
+      - name: "NOAH WR Abgabe"
+        unique_id: noah_board_output_w
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:transmission-tower-export
+        state: "{{ states('sensor.REPLACE_SERIAL_output_power') | float(0) }}"
+        availability: "{{ states('sensor.REPLACE_SERIAL_output_power') | is_number }}"
+
+      - name: "NOAH SoC"
+        unique_id: noah_board_soc
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ states('sensor.REPLACE_SERIAL_soc') | float(0) }}"
+        availability: "{{ states('sensor.REPLACE_SERIAL_soc') | is_number }}"
+
+      - name: "NOAH Solar heute"
+        unique_id: noah_board_generation_today
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:solar-power-variant
+        state: "{{ states('sensor.REPLACE_SERIAL_generation_today') | float(0) }}"
+        availability: "{{ states('sensor.REPLACE_SERIAL_generation_today') | is_number }}"
+
+      # Näherung Verlustleistung: Solar − Laden + Entladen − WR-Abgabe
+      # (Vorzeichen je nach Moment; nur zur Orientierung, kein Eichwert)
+      - name: "NOAH Verlustleistung (Näherung)"
+        unique_id: noah_board_loss_w_approx
+        unit_of_measurement: "W"
+        device_class: power
+        state_class: measurement
+        icon: mdi:flash-alert
+        state: >-
+          {% set solar = states('sensor.noah_solarleistung') | float(0) %}
+          {% set charge = states('sensor.noah_ladeleistung') | float(0) %}
+          {% set discharge = states('sensor.noah_entladeleistung') | float(0) %}
+          {% set out = states('sensor.noah_wr_abgabe') | float(0) %}
+          {{ (solar - charge + discharge - out) | round(0) }}
+
+# Optional: Energie aus WR-Abgabe (für „heute ins Haus“).
+# Nach dem ersten Start der Alias-Sensoren diesen Block aktivieren
+# (Einrückung unter sensor: beibehalten) bzw. als Helfer in der UI anlegen:
+#
+# sensor:
+#   - platform: integration
+#     source: sensor.noah_wr_abgabe
+#     name: "NOAH WR Abgabe Energie"
+#     unique_id: noah_board_output_energy
+#     unit_prefix: k
+#     round: 3
+#     method: left
+#
+# utility_meter:
+#   noah_wr_abgabe_heute:
+#     source: sensor.noah_wr_abgabe_energie
+#     name: "NOAH WR Abgabe heute"
+#     cycle: daily

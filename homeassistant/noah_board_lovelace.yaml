@@ -1,0 +1,217 @@
+views:
+  - type: sections
+    title: Energie
+    path: energie
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: So fließt die Energie heute
+            heading_style: title
+          - type: markdown
+            content: |
+              **Logik**
+
+              Solar → Speicher und/oder Wechselrichter  
+              Wechselrichter → Vom Balkon ins Haus + Verlust WR  
+              (Vom Balkon + Netzbezug) → Stromverbrauch + Einspeisung
+
+              **Zwei getrennte Verluste**
+
+              - Verlust WR = Zum WR − Vom Balkon ins Haus (gemessen)  
+              - Verlust Speicher ≈ Bilanzlücke Z = (S0 + Solar − Zum WR) − Speicher jetzt  
+                (Rest: Wirkungsgrad, Eigenverbrauch NOAH, Messungenauigkeit)
+
+              Stromverbrauch = Netzbezug + Vom Balkon ins Haus − Einspeisung  
+              Batterie wird nicht aus dem Netz geladen.
+
+              **Eigenverbrauch & Autarkie** (Bezug: Vom Balkon ins Haus, nicht Solar roh)
+
+              - Genutzt aus Balkon = Vom Balkon − Einspeisung  
+              - Eigenverbrauch = Genutzt aus Balkon / Vom Balkon  
+              - Autarkie = Genutzt aus Balkon / Stromverbrauch
+          - type: custom:sankey-chart
+            title: Kompletter Fluss heute
+            show_names: true
+            show_states: true
+            show_units: true
+            round: 2
+            height: 380
+            ignore_missing_entities: true
+            nodes:
+              - id: solar
+                entity_id: sensor.0pvp00ed26ut03e9_generation_today
+                section: 0
+                name: Solar
+                color: "#F9A825"
+              - id: netzbezug
+                entity_id: sensor.ecotracker_netzbezug_heute
+                section: 0
+                name: Netzbezug
+                color: "#42A5F5"
+                filters:
+                  - multiply: 0.001
+                unit_of_measurement: kWh
+
+              - id: zum_wr
+                section: 1
+                name: Zum Wechselrichter
+                entity_id: sensor.bzp4nxx18c_energy_today_input_1
+                add_entities:
+                  - sensor.bzp4nxx18c_energy_today_input_2
+                color: "#29B6F6"
+              - id: speicher
+                section: 1
+                type: remaining_parent_state
+                name: In den Speicher
+                color: "#66BB6A"
+
+              - id: balkon_haus
+                entity_id: sensor.bzp4nxx18c_energy_today
+                section: 2
+                name: Vom Balkon ins Haus
+                color: "#FF7043"
+              - id: wr_verlust
+                section: 2
+                type: remaining_parent_state
+                name: Verlust Wechselrichter
+                color: "#78909C"
+
+              - id: stromverbrauch
+                section: 3
+                type: remaining_parent_state
+                name: Stromverbrauch
+                color: "#EF5350"
+              - id: einspeisung
+                entity_id: sensor.ecotracker_einspeisung_heute
+                section: 3
+                name: Einspeisung
+                color: "#26A69A"
+                filters:
+                  - multiply: 0.001
+                unit_of_measurement: kWh
+
+            links:
+              - source: solar
+                target: zum_wr
+              - source: solar
+                target: speicher
+              - source: zum_wr
+                target: balkon_haus
+              - source: zum_wr
+                target: wr_verlust
+              - source: balkon_haus
+                target: stromverbrauch
+              - source: balkon_haus
+                target: einspeisung
+              - source: netzbezug
+                target: stromverbrauch
+              - source: netzbezug
+                target: einspeisung
+        column_span: 3
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Zahlen heute
+            heading_style: title
+          - type: markdown
+            content: |
+              {% set cap = 4096 %}
+              {% set soc = states('sensor.0pvp00ed26ut03e9_soc') | float(0) %}
+              {% set s1 = soc / 100 * cap %}
+              {% set x = states('sensor.0pvp00ed26ut03e9_generation_today') | float(0) * 1000 %}
+              {% set i1 = states('sensor.bzp4nxx18c_energy_today_input_1') | float(0) * 1000 %}
+              {% set i2 = states('sensor.bzp4nxx18c_energy_today_input_2') | float(0) * 1000 %}
+              {% set y = i1 + i2 %}
+              {% set balkon = states('sensor.bzp4nxx18c_energy_today') | float(0) * 1000 %}
+              {% set wr_v = y - balkon %}
+              {% set s0 = states('input_number.noah_s0_wh') | float(s1) %}
+              {% set s2 = s0 + x - y %}
+              {% set z = s2 - s1 %}
+              {% set delta_bat = s1 - s0 %}
+              {% set nb = states('sensor.ecotracker_netzbezug_heute') | float(0) %}
+              {% set ei = states('sensor.ecotracker_einspeisung_heute') | float(0) %}
+              {% set verbrauch = nb + balkon - ei %}
+              {% set genutzt = (balkon - ei) if (balkon - ei) > 0 else 0 %}
+              {% set eigen_pct = (genutzt / balkon * 100) if balkon > 0 else 0 %}
+              {% set autark_pct = (genutzt / verbrauch * 100) if verbrauch > 0 else 0 %}
+
+              | Was | kWh / % |
+              |---|---:|
+              | Solar | {{ (x / 1000) | round(2) }} kWh |
+              | Zum Wechselrichter | {{ (y / 1000) | round(2) }} kWh |
+              | Speicheränderung seit Mitternacht | {{ (delta_bat / 1000) | round(2) }} kWh |
+              | Verlust Speicher (Bilanzlücke Z) | {{ (z / 1000) | round(2) }} kWh |
+              | Vom Balkon ins Haus | {{ (balkon / 1000) | round(2) }} kWh |
+              | Verlust Wechselrichter | {{ (wr_v / 1000) | round(2) }} kWh |
+              | Netzbezug | {{ (nb / 1000) | round(2) }} kWh |
+              | Einspeisung | {{ (ei / 1000) | round(2) }} kWh |
+              | Stromverbrauch | {{ (verbrauch / 1000) | round(2) }} kWh |
+              | **Genutzt aus Balkon** (Balkon − Einspeisung) | {{ (genutzt / 1000) | round(2) }} kWh |
+              | **Eigenverbrauch** | {{ eigen_pct | round(0) }} % |
+              | **Autarkie** | {{ autark_pct | round(0) }} % |
+              | Speicher jetzt ({{ soc | round(0) }} %) | {{ (s1 / 1000) | round(2) }} kWh |
+              | Speicher Mitternacht S0 | {{ (s0 / 1000) | round(2) }} kWh |
+
+              Check Solar: Zum WR + Speicheränderung + Verlust Speicher ≈ {{ ((y + delta_bat + z) / 1000) | round(2) }} kWh
+
+              *Eigenverbrauch/Autarkie beziehen sich auf „Vom Balkon ins Haus“, nicht auf Solar vor Speicher/WR.  
+              Netz-Helfer: heute ggf. unvollständig; Verlust Speicher braucht korrektes S0.*
+          - type: gauge
+            entity: sensor.0pvp00ed26ut03e9_soc
+            name: Speicher
+            min: 0
+            max: 100
+            needle: true
+          - type: entities
+            title: Helfer
+            entities:
+              - entity: input_number.noah_s0_wh
+                name: Speicher Start Mitternacht (Wh)
+              - entity: sensor.ecotracker_netzbezug_heute
+                name: Netzbezug heute
+              - entity: sensor.ecotracker_einspeisung_heute
+                name: Einspeisung heute
+        column_span: 2
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Live
+            heading_style: title
+          - type: entity
+            entity: sensor.0pvp00ed26ut03e9_solar_power
+            name: Solar
+          - type: entity
+            entity: sensor.0pvp00ed26ut03e9_output_power
+            name: Balkon-Abgabe
+          - type: entity
+            entity: sensor.0pvp00ed26ut03e9_charging_power
+            name: Laden
+          - type: entity
+            entity: sensor.0pvp00ed26ut03e9_discharge_power
+            name: Entladen
+          - type: entity
+            entity: sensor.ecotracker_power
+            name: Hausnetz
+        column_span: 1
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Monat (offizielles Energy-Dashboard)
+            heading_style: title
+          - type: markdown
+            content: |
+              Monatsverläufe aus der HA-Energy-Konfiguration.
+              Die Gauges nutzen oft eine andere Definition als unsere Tabelle
+              (Bezug dort oft Solar roh; bei uns: Vom Balkon ins Haus).
+          - type: energy-usage-graph
+            title: Verbrauch & Netz
+          - type: energy-solar-graph
+            title: Solar
+          - type: energy-self-sufficiency-gauge
+          - type: energy-solar-consumed-gauge
+        column_span: 3
