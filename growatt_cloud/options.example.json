@@ -1,0 +1,17 @@
+{
+  "api_token": "DEIN_OPEN_API_TOKEN",
+  "server_url": "https://openapi.growatt.com",
+  "storage_sn": "0PVP00ED26UT03E9",
+  "storage_family": "auto",
+  "inverter_sn": "BZP4NXX18C",
+  "poll_storage_seconds": 60,
+  "poll_inverter_seconds": 300,
+  "poll_devices_seconds": 3600,
+  "mqtt_host": "core-mosquitto",
+  "mqtt_port": 1883,
+  "mqtt_user": "",
+  "mqtt_password": "",
+  "mqtt_discovery_prefix": "homeassistant",
+  "mqtt_state_prefix": "growatt_cloud",
+  "log_level": "info"
+}
