@@ -15,7 +15,5 @@ SENSOR_TYPES: dict[str, tuple[str, str | None, str | None, str | None, int | Non
     "powerPhase2": ("power_phase_2", "W", "power", "measurement", 0),
     "powerPhase3": ("power_phase_3", "W", "power", "measurement", 0),
     "energyCounterIn": ("energy_in", "Wh", "energy", "total_increasing", 0),
-    "energyCounterInT1": ("energy_in_t1", "Wh", "energy", "total_increasing", 0),
-    "energyCounterInT2": ("energy_in_t2", "Wh", "energy", "total_increasing", 0),
     "energyCounterOut": ("energy_out", "Wh", "energy", "total_increasing", 0),
 }
