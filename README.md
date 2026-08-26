@@ -27,6 +27,17 @@ Nur `/v1/json`, Shelly-Status-RPC oder der Idle-Watchdog (>5 s ohne Trigger) r
 Ab **1.2.1** kommen vorgebaute Images von GHCR (kein Docker-Build auf dem Pi).  
 Das verhindert Supervisor-Crashes / OOM auf Raspberry Pi 3.
 
+## Releases (wichtig)
+
+Home Assistant liest die Version aus `config.yaml` im Git-Repo. Damit kein Update erscheint, bevor das Image da ist:
+
+1. Code nach `master` pushen → baut nur Preview-Tags `edge` / `sha-…`  
+2. **GitHub → Actions → „Release add-on“ → Run workflow** mit Version z. B. `1.3.2`  
+3. Workflow: Image pushen → **erst danach** Versionsbump committen  
+4. Dann in HA updaten  
+
+Version in `config.yaml` nicht von Hand hochsetzen.
+
 Wenn der Store hängt: App deinstallieren, Store einmal neu laden, neu installieren.  
 Währenddessen HA/Supervisor nicht neu starten.
 

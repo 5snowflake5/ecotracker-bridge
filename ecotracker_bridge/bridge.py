@@ -30,7 +30,7 @@ import shelly_rpc
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.3.2"
+VERSION = "1.3.1"
 # Shelly/NOAH pollen ~alle 3 s – physischen Tracker nicht jedes Mal neu anfassen.
 MIN_SOURCE_REFETCH_S = 2.0
 SOURCE_TIMEOUT_S = 4.0
