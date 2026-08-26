@@ -30,9 +30,33 @@ import shelly_rpc
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
-VERSION = "1.3.0"
+VERSION = "1.3.1"
+# Shelly/NOAH pollen ~alle 3 s – physischen Tracker nicht jedes Mal neu anfassen.
+MIN_SOURCE_REFETCH_S = 2.0
+SOURCE_TIMEOUT_S = 4.0
+SOURCE_ERROR_LOG_INTERVAL_S = 60.0
+_last_source_error_log = 0.0
 
 LOG = logging.getLogger("ecotracker-bridge")
+
+
+class BerlinFormatter(logging.Formatter):
+    """Log-Zeitstempel immer Europe/Berlin, unabhängig von Container-UTC."""
+
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:  # noqa: N802
+        dt = datetime.fromtimestamp(record.created, tz=timezone.utc).astimezone(_berlin_tz())
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.isoformat(timespec="seconds")
+
+
+def _berlin_tz():
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo("Europe/Berlin")
+    except Exception:
+        return BERLIN
 
 
 def setup_logging(level_name: str = "info") -> None:
@@ -42,7 +66,7 @@ def setup_logging(level_name: str = "info") -> None:
     root.handlers.clear()
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
-        logging.Formatter(
+        BerlinFormatter(
             "%(asctime)s %(levelname)s %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
@@ -53,12 +77,7 @@ def setup_logging(level_name: str = "info") -> None:
 
 
 def berlin_now() -> datetime:
-    try:
-        from zoneinfo import ZoneInfo
-
-        return datetime.now(ZoneInfo("Europe/Berlin"))
-    except Exception:
-        return datetime.now(BERLIN)
+    return datetime.now(_berlin_tz())
 
 
 def try_load_options() -> dict[str, Any] | None:
@@ -380,12 +399,27 @@ class MqttHaPublisher:
 MQTT = MqttHaPublisher()
 
 
-def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
+def fetch_source(url: str, *, reason: str, force: bool = False) -> dict[str, Any] | None:
     """Holt frisch vom physischen EcoTracker und aktualisiert den Cache."""
+    global _last_source_error_log
+    if not force:
+        snap = STATE.snapshot()
+        last_ok = snap.get("last_ok")
+        if last_ok is not None:
+            age = max(0.0, (berlin_now() - last_ok).total_seconds())
+            if age < MIN_SOURCE_REFETCH_S and isinstance(snap.get("payload"), dict):
+                LOG.debug(
+                    "Quelle übersprungen (%s): Cache %.1f s alt (< %.1f s)",
+                    reason,
+                    age,
+                    MIN_SOURCE_REFETCH_S,
+                )
+                return snap["payload"]
+
     started = time.perf_counter()
     try:
         req = Request(url, headers=FETCH_HEADERS, method="GET")
-        with urlopen(req, timeout=2.5) as resp:
+        with urlopen(req, timeout=SOURCE_TIMEOUT_S) as resp:
             body = resp.read()
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         data = json.loads(body)
@@ -409,20 +443,33 @@ def fetch_source(url: str, *, reason: str) -> dict[str, Any] | None:
         )
         MQTT.publish_state(data)
         return data
-    except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+    except (URLError, HTTPError, TimeoutError, ValueError, json.JSONDecodeError, OSError) as exc:
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         with STATE.lock:
             STATE.last_error = str(exc)
             STATE.polls_fail += 1
             fail_count = STATE.polls_fail
-        LOG.error(
-            "Quelle fehlgeschlagen (%s) #%s nach %.0f ms: %s",
-            reason,
-            fail_count,
-            elapsed_ms,
-            exc,
-        )
-        return None
+            cached = STATE.payload
+        now = time.monotonic()
+        if now - _last_source_error_log >= SOURCE_ERROR_LOG_INTERVAL_S:
+            _last_source_error_log = now
+            LOG.error(
+                "Quelle fehlgeschlagen (%s) #%s nach %.0f ms: %s%s",
+                reason,
+                fail_count,
+                elapsed_ms,
+                exc,
+                " – Cache bleibt aktiv" if isinstance(cached, dict) else "",
+            )
+        else:
+            LOG.debug(
+                "Quelle fehlgeschlagen (%s) #%s nach %.0f ms: %s",
+                reason,
+                fail_count,
+                elapsed_ms,
+                exc,
+            )
+        return cached if isinstance(cached, dict) else None
 
 
 def poll_loop() -> None:
@@ -687,18 +734,22 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/shelly", "/shelly/"):
             self._handle_shelly_rpc("Shelly.GetDeviceInfo")
             return
-        if path.startswith("/rpc/"):
-            method = path[len("/rpc/") :].strip("/")
+        if path.startswith("/rpc/") or path in ("/rpc", "/rpc/"):
+            method = path[len("/rpc/") :].strip("/") if path.startswith("/rpc/") else ""
             if method:
                 self._handle_shelly_rpc(method)
                 return
+            # HA/Clients prüfen manchmal nur GET /rpc ohne Methode.
+            LOG.debug("GET /rpc von %s → ListMethods", client)
+            self._handle_shelly_rpc("Shelly.ListMethods")
+            return
         if path in ("/", "/index.html"):
             # Statusseite nur Cache – sonst würde meta refresh den physischen Tracker killen.
             snap = STATE.snapshot()
             LOG.debug("GET / von %s → 200 Statusseite (Cache)", client)
             self._send(200, html_status(snap), "text/html; charset=utf-8")
             return
-        LOG.warning("GET %s von %s → 404", path, client)
+        LOG.debug("GET %s von %s → 404", path, client)
         self._send(404, b"not found", "text/plain; charset=utf-8")
 
     def do_POST(self) -> None:  # noqa: N802
