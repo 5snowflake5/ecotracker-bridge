@@ -1,5 +1,18 @@
 # EcoTracker Bridge
 
+Zwei HA-Apps in diesem Repo:
+
+| App | Zweck |
+|-----|--------|
+| **EcoTracker Bridge** | Physischen EcoTracker als virtuellen EcoTracker/Shelly für NOAH emulieren |
+| **Growatt Cloud** | Noah/**Nexa** + MIN-WR über **einen** Open-API-Token (v4) → MQTT – Ersatz für noah-mqtt + Growatt-Server |
+
+Details Growatt Cloud: [growatt_cloud/DOCS.md](growatt_cloud/DOCS.md)
+
+---
+
+## EcoTracker Bridge
+
 Schlanker Ersatz für uni-meter: Emulation für **Growatt NOAH** (EcoTracker + optional Shelly Pro 3EM) + **HA-Sensoren aus dem Cache** (ohne Extra-Last auf dem physischen EcoTracker).
 
 ## Datenfluss
