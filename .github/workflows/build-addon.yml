@@ -5,7 +5,6 @@ on:
     branches: [master]
     paths:
       - "ecotracker_bridge/**"
-      - "growatt_cloud/**"
       - ".github/workflows/build-addon.yml"
   workflow_dispatch:
 
@@ -20,17 +19,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - addon: ecotracker_bridge
-            arch: aarch64
+          - arch: aarch64
             platform: linux/arm64
-          - addon: ecotracker_bridge
-            arch: amd64
-            platform: linux/amd64
-          - addon: growatt_cloud
-            arch: aarch64
-            platform: linux/arm64
-          - addon: growatt_cloud
-            arch: amd64
+          - arch: amd64
             platform: linux/amd64
     steps:
       - uses: actions/checkout@v4
@@ -38,9 +29,9 @@ jobs:
       - name: Read version
         id: ver
         run: |
-          v=$(sed -n 's/^version: "\(.*\)"/\1/p' ${{ matrix.addon }}/config.yaml | head -1)
+          v=$(sed -n 's/^version: "\(.*\)"/\1/p' ecotracker_bridge/config.yaml | head -1)
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "Building ${{ matrix.addon }} $v for ${{ matrix.arch }}"
+          echo "Building $v for ${{ matrix.arch }}"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -53,11 +44,11 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.addon }}
-          file: ./${{ matrix.addon }}/Dockerfile
+          context: ./ecotracker_bridge
+          file: ./ecotracker_bridge/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
           provenance: false
           tags: |
-            ghcr.io/5snowflake5/${{ matrix.arch }}-addon-${{ matrix.addon }}:${{ steps.ver.outputs.version }}
-            ghcr.io/5snowflake5/${{ matrix.arch }}-addon-${{ matrix.addon }}:latest
+            ghcr.io/5snowflake5/${{ matrix.arch }}-addon-ecotracker_bridge:${{ steps.ver.outputs.version }}
+            ghcr.io/5snowflake5/${{ matrix.arch }}-addon-ecotracker_bridge:latest
