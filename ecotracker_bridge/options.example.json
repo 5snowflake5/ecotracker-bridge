@@ -1,4 +1,5 @@
 {
+  "_comment_legacy": "Flache Optionen – weiterhin Standard in der HA-UI",
   "source_url": "http://192.168.55.140",
   "idle_fetch_seconds": 5,
   "log_level": "info",
@@ -8,5 +9,44 @@
   "productid": "1137",
   "announce_ip": "",
   "shelly_enabled": true,
-  "shelly_mac": "C8C9A3B43A45"
+  "shelly_mac": "C8C9A3B43A45",
+  "mqtt_enabled": true,
+  "mqtt_host": "core-mosquitto",
+  "mqtt_port": 1883,
+  "mqtt_user": "",
+  "mqtt_password": "",
+  "mqtt_discovery_prefix": "homeassistant",
+  "sources": [],
+  "emulators": [],
+  "_comment_hub": "Optional: Listen statt Legacy-Felder (YAML-Mode oder options.json bearbeiten)",
+  "_example_sources": [
+    {
+      "id": "grid",
+      "type": "ecotracker",
+      "url": "http://192.168.55.140",
+      "idle_fetch_seconds": 5
+    },
+    {
+      "id": "pv",
+      "type": "http_json",
+      "url": "http://wechselrichter/status",
+      "json_power": "emeters.0.power"
+    }
+  ],
+  "_example_emulators": [
+    {
+      "id": "ecotracker",
+      "type": "ecotracker",
+      "source": "grid",
+      "mac": "B43A45A1B2C3",
+      "serial": "293d45273261",
+      "productid": "1137"
+    },
+    {
+      "id": "shelly",
+      "type": "shelly_pro3em",
+      "source": "grid",
+      "mac": "C8C9A3B43A45"
+    }
+  ]
 }

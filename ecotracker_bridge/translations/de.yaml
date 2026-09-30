@@ -1,16 +1,16 @@
 configuration:
   source_url:
     name: EcoTracker-Adresse
-    description: IP oder URL des physischen EcoTrackers, ohne /v1/json
+    description: "Einfach: IP oder URL des physischen EcoTrackers, ohne /v1/json. Unbenutzt lassen, wenn unten eine Zähler-Karte steht."
   idle_fetch_seconds:
     name: Idle-Fetch
-    description: "Selbst holen, wenn so viele Sekunden kein /v1/json (NOAH) kam. 0 = aus. Default 5."
+    description: "Selbst holen, wenn so viele Sekunden kein Abruf vom Speicher kam. 0 = aus. Default 5."
   log_level:
     name: Log-Level
-    description: info = ruhig, debug = jeden GET inkl. Intervall Δ
+    description: info = ruhig, debug = jeden Abruf
   mqtt_enabled:
     name: MQTT-Sensoren
-    description: Sensoren per Home Assistant MQTT Discovery anlegen (Mosquitto nötig)
+    description: Sensoren per Home Assistant MQTT Discovery (Mosquitto nötig)
   mqtt_host:
     name: MQTT-Host
     description: Meist core-mosquitto
@@ -30,11 +30,11 @@ configuration:
     name: HTTP-Port
     description: Growatt NOAH erwartet 80
   mac:
-    name: MAC
+    name: EcoTracker-MAC
     description: Feste 12-stellige Hex-MAC für Hostname ecotracker-<mac>. Nicht ändern nach dem Koppeln.
   serial:
     name: Serial
-    description: mDNS-TXT serial (Default wie uni-meter)
+    description: mDNS-Serial (Default wie uni-meter)
   productid:
     name: Product ID
     description: "1137 = EcoTracker IR"
@@ -42,10 +42,313 @@ configuration:
     name: Angekündigte IP
     description: Leer lassen für Auto-Erkennung. Nur setzen, wenn der Pi mehrere IPs hat.
   shelly_enabled:
-    name: Shelly Pro 3EM
-    description: Zweiten virtuellen Zähler (Gen2 RPC /rpc + mDNS _shelly._tcp) parallel bereitstellen. Gleiche Messwerte wie EcoTracker.
+    name: Zusätzlich Shelly Pro 3EM
+    description: "Zweiter virtueller Zähler (HTTP /rpc), gleiche Werte. Für Growatt. Aus, wenn unten Ausgaben stehen."
   shelly_mac:
     name: Shelly-MAC
     description: Feste 12-stellige Hex-MAC für Hostname shellypro3em-<mac>. Nicht ändern nach dem Koppeln.
+  tibber:
+    name: Tibber Pulse
+    description: "Eine Zeile pro Pulse. Passwort vom Aufdruck. Quellen-ID ist sonst tibber_pulse — die bei Ausgabe als Quelle eintragen."
+    fields:
+      id:
+        name: Quellen-ID
+        description: Name für Ausgaben. Leer = tibber_pulse.
+      host:
+        name: Bridge-IP
+        description: Lokale IP der Tibber-Bridge
+      password:
+        name: Passwort
+        description: Aufdruck auf der Bridge
+      user:
+        name: Benutzer
+        description: Meist admin
+      node_id:
+        name: Node-ID
+        description: Meist 1
+      label:
+        name: Bezeichnung
+        description: Auf der Statusseite
+  homewizard:
+    name: HomeWizard
+    description: "Lokaler P1-Zähler. Ohne Token = API v1. Mit Token = API v2 (HTTPS)."
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = homewizard
+      host:
+        name: Zähler-IP
+      token:
+        name: API-v2-Token
+        description: Leer lassen für lokale API v1
+      label:
+        name: Bezeichnung
+  sma:
+    name: SMA Energy Meter
+    description: "Speedwire-Multicast. Die App nutzt bereits das Host-Netz. Leere Zeile reicht, wenn ein Zähler im LAN ist."
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = sma
+      serial_number:
+        name: Seriennummer
+        description: Optionaler Filter
+      udp_port:
+        name: UDP-Port
+        description: Default 9522
+      multicast_group:
+        name: Multicast-Gruppe
+        description: Default 239.12.255.254
+      label:
+        name: Bezeichnung
+  fronius:
+    name: Fronius
+    description: Solar-API-Zähler (GetMeterRealtimeData).
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = fronius
+      host:
+        name: Wechselrichter-IP
+      device_id:
+        name: Geräte-ID
+        description: Meist 0
+      per_phase:
+        name: Pro Phase
+        description: L1/L2/L3 statt nur Summe
+      label:
+        name: Bezeichnung
+  tasmota:
+    name: Tasmota
+    description: Liest status 10 / ENERGY. Leistungsfeld ist sonst Power.
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = tasmota
+      host:
+        name: Geräte-IP
+      user:
+        name: Benutzer
+        description: Nur wenn die Web-UI ein Passwort hat
+      password:
+        name: Passwort
+      json_power:
+        name: Leistungsfelder
+        description: "Komma für Phasen, z. B. Power_1,Power_2,Power_3"
+      json_prefix:
+        name: JSON-Prefix
+        description: Default ENERGY
+      label:
+        name: Bezeichnung
+  shelly_source:
+    name: Physisches Shelly
+    description: "Echtes Shelly lesen (nicht den virtuellen Zähler unten). Modell 3empro ist der Default."
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = shelly
+      host:
+        name: Shelly-IP
+      shelly_model:
+        name: Modell
+      user:
+        name: Benutzer
+      password:
+        name: Passwort
+      meter_index:
+        name: Zähler-Index
+        description: Nur ältere 1PM / EM mit mehreren Kanälen
+      label:
+        name: Bezeichnung
+  http_json:
+    name: HTTP-JSON
+    description: Beliebiges JSON. Leistungspfad mit Punkten, z. B. emeters.0.power.
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = http_json
+      url:
+        name: URL
+        description: Volle URL inklusive Pfad
+      json_power:
+        name: Leistungspfad
+        description: Default power
+      json_power_l1:
+        name: Phase 1
+      json_power_l2:
+        name: Phase 2
+      json_power_l3:
+        name: Phase 3
+      json_energy_in:
+        name: Bezug (Pfad)
+        description: Wattstunden
+      json_energy_out:
+        name: Einspeisung (Pfad)
+      label:
+        name: Bezeichnung
+  mqtt_source:
+    name: MQTT-Zähler
+    description: Letzte Nachricht auf einem Topic. Zahl, oder JSON wenn ein Leistungspfad gesetzt ist.
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = mqtt
+      mqtt_topic:
+        name: Topic
+      mqtt_host:
+        name: Broker
+        description: Leer = derselbe MQTT-Host wie oben
+      mqtt_port:
+        name: Port
+      mqtt_user:
+        name: Benutzer
+      mqtt_password:
+        name: Passwort
+      json_power:
+        name: Leistungspfad
+        description: Leer, wenn die Nachricht eine Zahl ist
+      label:
+        name: Bezeichnung
+  ha_source:
+    name: Home-Assistant-Entität
+    description: Liest eine Entität dieses Home Assistant. Token setzt die App selbst.
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = homeassistant
+      ha_power_entity:
+        name: Leistungs-Entität
+        description: z. B. sensor.netz_leistung
+      ha_power_l1_entity:
+        name: Phase 1
+      ha_power_l2_entity:
+        name: Phase 2
+      ha_power_l3_entity:
+        name: Phase 3
+      ha_energy_in_entity:
+        name: Bezug
+      ha_energy_out_entity:
+        name: Einspeisung
+      ha_url:
+        name: HA-URL
+        description: In der App leer lassen
+      ha_token:
+        name: Token
+        description: In der App leer lassen
+      label:
+        name: Bezeichnung
+  other_meters:
+    name: Weitere Zähler
+    description: "AMIS, VZLogger, ESPHome, Refoss, ioBroker, Enphase Envoy, SHRDZM. Nur die Felder füllen, die der Zähler braucht."
+    fields:
+      id:
+        name: Quellen-ID
+        description: Leer = Zählertyp
+      meter:
+        name: Zähler
+      host:
+        name: Host oder IP
+      uuid:
+        name: VZLogger-UUID
+        description: Komma = Phasen
+      sensor_id:
+        name: ESPHome-Sensor
+      alias:
+        name: ioBroker-Datenpunkt
+      token:
+        name: Envoy-Token
+      user:
+        name: Benutzer
+      password:
+        name: Passwort
+      channels:
+        name: Refoss-Kanäle
+        description: z. B. 1,2,3
+      port:
+        name: Port
+        description: Nur wenn nicht der Default
+      label:
+        name: Bezeichnung
+  outputs:
+    name: Ausgaben
+    description: "Virtuelle Zähler für den Speicher. Leer = EcoTracker (und Shelly, wenn an) von der ersten Quelle. Quellen-ID muss zur Karte oben passen. Danach neu starten."
+    fields:
+      id:
+        name: Name
+      type:
+        name: Speicher sieht
+      source:
+        name: Quellen-ID
+        description: Leer = erste Quelle
+      mac:
+        name: MAC
+        description: 12 Hex-Zeichen. Nach dem Koppeln nicht ändern.
+      serial:
+        name: Serial
+        description: EcoTracker oder Sparky
+      hostname:
+        name: Hostname
+        description: Leer = aus Typ und MAC
+      enabled:
+        name: Aktiv
+  sources:
+    name: Experten-Quellen
+    description: "Nur YAML, wenn einer Karte ein Feld fehlt. Sobald hier eine Zeile steht, werden die Zähler-Karten ignoriert."
+    fields:
+      id:
+        name: Quellen-ID
+      type:
+        name: Typ
+      url:
+        name: URL
+      host:
+        name: Host
+      password:
+        name: Passwort
+      token:
+        name: Token
+      user:
+        name: Benutzer
+      mqtt_topic:
+        name: MQTT-Topic
+      ha_power_entity:
+        name: HA-Entität
+      json_power:
+        name: Leistungspfad
+      device_id:
+        name: Geräte-ID
+      shelly_model:
+        name: Shelly-Modell
+      uuid:
+        name: UUID
+      sensor_id:
+        name: Sensor-ID
+      alias:
+        name: Alias
+      label:
+        name: Bezeichnung
+  emulators:
+    name: Experten-Ausgaben
+    description: "Wie Ausgaben, plus Product ID und UDP-Ports. Sobald hier eine Zeile steht, wird Ausgaben ignoriert."
+    fields:
+      id:
+        name: Name
+      type:
+        name: Speicher sieht
+      source:
+        name: Quellen-ID
+      enabled:
+        name: Aktiv
+      mac:
+        name: MAC
+      serial:
+        name: Serial
+      productid:
+        name: Product ID
+      hostname:
+        name: Hostname
+      udp_ports:
+        name: UDP-Ports
+        description: "Komma-Liste oder off. EM Gen3 Default 1010,2220. Pro EM-50 Default 2223."
 network:
-  80/tcp: HTTP EcoTracker JSON und Shelly RPC für Growatt NOAH
+  80/tcp: HTTP für EcoTracker, Shelly und Sparky

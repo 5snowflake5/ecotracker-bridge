@@ -55,7 +55,7 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Release $CUR → $V (${{ matrix.arch }})"
           sed -i "s/^version: \".*\"/version: \"$V\"/" ecotracker_bridge/config.yaml
-          sed -i "s/^VERSION = \".*\"/VERSION = \"$V\"/" ecotracker_bridge/bridge.py
+          sed -i "s/^VERSION = \".*\"/VERSION = \"$V\"/" ecotracker_bridge/util.py
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -98,10 +98,10 @@ jobs:
             exit 0
           fi
           sed -i "s/^version: \".*\"/version: \"$V\"/" ecotracker_bridge/config.yaml
-          sed -i "s/^VERSION = \".*\"/VERSION = \"$V\"/" ecotracker_bridge/bridge.py
+          sed -i "s/^VERSION = \".*\"/VERSION = \"$V\"/" ecotracker_bridge/util.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ecotracker_bridge/config.yaml ecotracker_bridge/bridge.py
+          git add ecotracker_bridge/config.yaml ecotracker_bridge/util.py
           MSG="Release $V (image published first)."
           if [[ -n "${NOTE// }" ]]; then
             MSG="$MSG $NOTE"

@@ -8,8 +8,7 @@ RUN apk add --no-cache \
     py3-zeroconf \
     py3-paho-mqtt
 
-COPY bridge.py /app/bridge.py
-COPY shelly_rpc.py /app/shelly_rpc.py
+COPY . /app/
 
 ENV PYTHONUNBUFFERED=1
 ENV TZ=Europe/Berlin

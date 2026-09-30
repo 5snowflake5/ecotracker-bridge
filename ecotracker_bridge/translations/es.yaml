@@ -1,0 +1,352 @@
+configuration:
+  source_url:
+    name: Dirección EcoTracker
+    description: "Modo simple: IP o URL del EcoTracker físico, sin /v1/json. Déjalo si añades una tarjeta de contador más abajo."
+  idle_fetch_seconds:
+    name: Lectura en reposo
+    description: "Leer solo tras tantos segundos sin petición de la batería. 0 = off. Por defecto 5."
+  log_level:
+    name: Nivel de log
+    description: info = silencioso, debug = cada petición
+  mqtt_enabled:
+    name: Sensores MQTT
+    description: Publicar sensores con MQTT Discovery (hace falta Mosquitto)
+  mqtt_host:
+    name: Host MQTT
+    description: Suele ser core-mosquitto
+  mqtt_port:
+    name: Puerto MQTT
+    description: "1883"
+  mqtt_user:
+    name: Usuario MQTT
+    description: Vacío si el broker permite acceso sin login
+  mqtt_password:
+    name: Contraseña MQTT
+    description: Opcional
+  mqtt_discovery_prefix:
+    name: Prefijo Discovery
+    description: homeassistant
+  port:
+    name: Puerto HTTP
+    description: Growatt NOAH espera 80
+  mac:
+    name: MAC EcoTracker
+    description: 12 hex para el nombre ecotracker-<mac>. No cambiar tras el emparejado.
+  serial:
+    name: Serie
+    description: Serie mDNS (valor de uni-meter)
+  productid:
+    name: ID de producto
+    description: "1137 = EcoTracker IR"
+  announce_ip:
+    name: IP anunciada
+    description: Vacío = detección automática. Solo si el Pi tiene varias IP.
+  shelly_enabled:
+    name: También Shelly Pro 3EM
+    description: "Segundo contador virtual (HTTP /rpc), mismos valores. Para Growatt. Se ignora si hay salidas abajo."
+  shelly_mac:
+    name: MAC Shelly
+    description: 12 hex para shellypro3em-<mac>. No cambiar tras el emparejado.
+  tibber:
+    name: Tibber Pulse
+    description: "Una fila por Pulse. La contraseña impresa es obligatoria. El id de fuente es tibber_pulse si se deja vacío — úsalo en Salidas."
+    fields:
+      id:
+        name: Id de fuente
+        description: Nombre que usan las salidas. Vacío = tibber_pulse.
+      host:
+        name: IP del bridge
+      password:
+        name: Contraseña
+        description: Impresa en el bridge
+      user:
+        name: Usuario
+        description: Suele ser admin
+      node_id:
+        name: Id de nodo
+        description: Suele ser 1
+      label:
+        name: Etiqueta
+  homewizard:
+    name: HomeWizard
+    description: "Contador P1 local. Sin token = API v1. Con token = API v2 (HTTPS)."
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = homewizard
+      host:
+        name: IP del contador
+      token:
+        name: Token API v2
+        description: Vacío para la API local v1
+      label:
+        name: Etiqueta
+  sma:
+    name: SMA Energy Meter
+    description: "Multicast Speedwire. El add-on ya usa la red del host. Una fila vacía basta si hay un solo contador."
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = sma
+      serial_number:
+        name: Número de serie
+        description: Filtro opcional
+      udp_port:
+        name: Puerto UDP
+        description: Por defecto 9522
+      multicast_group:
+        name: Grupo multicast
+        description: Por defecto 239.12.255.254
+      label:
+        name: Etiqueta
+  fronius:
+    name: Fronius
+    description: Contador Solar API (GetMeterRealtimeData).
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = fronius
+      host:
+        name: IP del inversor
+      device_id:
+        name: Id de dispositivo
+        description: Suele ser 0
+      per_phase:
+        name: Por fase
+        description: L1/L2/L3 en lugar de solo la suma
+      label:
+        name: Etiqueta
+  tasmota:
+    name: Tasmota
+    description: Lee status 10 / ENERGY. El campo de potencia por defecto es Power.
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = tasmota
+      host:
+        name: IP del dispositivo
+      user:
+        name: Usuario
+        description: Solo si la web tiene contraseña
+      password:
+        name: Contraseña
+      json_power:
+        name: Campos de potencia
+        description: "Lista de fases, p. ej. Power_1,Power_2,Power_3"
+      json_prefix:
+        name: Prefijo JSON
+        description: Por defecto ENERGY
+      label:
+        name: Etiqueta
+  shelly_source:
+    name: Shelly físico
+    description: "Leer un Shelly real (no el virtual). El modelo por defecto es 3empro."
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = shelly
+      host:
+        name: IP Shelly
+      shelly_model:
+        name: Modelo
+      user:
+        name: Usuario
+      password:
+        name: Contraseña
+      meter_index:
+        name: Índice del contador
+        description: Solo 1PM / EM antiguos con varios canales
+      label:
+        name: Etiqueta
+  http_json:
+    name: HTTP JSON
+    description: Cualquier JSON. Ruta con puntos, p. ej. emeters.0.power.
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = http_json
+      url:
+        name: URL
+        description: URL completa con la ruta
+      json_power:
+        name: Ruta de potencia
+        description: Por defecto power
+      json_power_l1:
+        name: Fase 1
+      json_power_l2:
+        name: Fase 2
+      json_power_l3:
+        name: Fase 3
+      json_energy_in:
+        name: Importación (ruta)
+        description: Vatios-hora
+      json_energy_out:
+        name: Exportación (ruta)
+      label:
+        name: Etiqueta
+  mqtt_source:
+    name: Contador MQTT
+    description: Último mensaje de un topic. Un número, o JSON si hay ruta de potencia.
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = mqtt
+      mqtt_topic:
+        name: Topic
+      mqtt_host:
+        name: Broker
+        description: Vacío = el mismo host MQTT de arriba
+      mqtt_port:
+        name: Puerto
+      mqtt_user:
+        name: Usuario
+      mqtt_password:
+        name: Contraseña
+      json_power:
+        name: Ruta de potencia
+        description: Vacío si el mensaje es un número
+      label:
+        name: Etiqueta
+  ha_source:
+    name: Entidad de Home Assistant
+    description: Lee una entidad de este Home Assistant. El token lo pone el add-on.
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = homeassistant
+      ha_power_entity:
+        name: Entidad de potencia
+        description: p. ej. sensor.potencia_red
+      ha_power_l1_entity:
+        name: Fase 1
+      ha_power_l2_entity:
+        name: Fase 2
+      ha_power_l3_entity:
+        name: Fase 3
+      ha_energy_in_entity:
+        name: Importación
+      ha_energy_out_entity:
+        name: Exportación
+      ha_url:
+        name: URL de HA
+        description: Déjalo vacío en el add-on
+      ha_token:
+        name: Token
+        description: Déjalo vacío en el add-on
+      label:
+        name: Etiqueta
+  other_meters:
+    name: Otros contadores
+    description: "AMIS, VZLogger, ESPHome, Refoss, ioBroker, Enphase Envoy, SHRDZM. Rellena solo lo que ese contador necesita."
+    fields:
+      id:
+        name: Id de fuente
+        description: Vacío = tipo de contador
+      meter:
+        name: Contador
+      host:
+        name: Host o IP
+      uuid:
+        name: UUID de VZLogger
+        description: Coma = fases
+      sensor_id:
+        name: Sensor ESPHome
+      alias:
+        name: Estado ioBroker
+      token:
+        name: Token Envoy
+      user:
+        name: Usuario
+      password:
+        name: Contraseña
+      channels:
+        name: Canales Refoss
+        description: p. ej. 1,2,3
+      port:
+        name: Puerto
+        description: Solo si no es el predeterminado
+      label:
+        name: Etiqueta
+  outputs:
+    name: Salidas
+    description: "Contadores virtuales para la batería. Vacío = EcoTracker (y Shelly si está activo) desde el primer contador. El id de fuente debe coincidir. Reinicia después."
+    fields:
+      id:
+        name: Nombre
+      type:
+        name: La batería ve
+      source:
+        name: Id de fuente
+        description: Vacío = primer contador
+      mac:
+        name: MAC
+        description: 12 hex. No cambiar tras el emparejado.
+      serial:
+        name: Serie
+        description: EcoTracker o Sparky
+      hostname:
+        name: Hostname
+        description: Vacío = se arma con el tipo y la MAC
+      enabled:
+        name: Activo
+  sources:
+    name: Fuentes experto
+    description: "Solo YAML si a una tarjeta le falta un campo. Si hay una fila aquí, se ignoran las tarjetas de contador."
+    fields:
+      id:
+        name: Id de fuente
+      type:
+        name: Tipo
+      url:
+        name: URL
+      host:
+        name: Host
+      password:
+        name: Contraseña
+      token:
+        name: Token
+      user:
+        name: Usuario
+      mqtt_topic:
+        name: Topic MQTT
+      ha_power_entity:
+        name: Entidad HA
+      json_power:
+        name: Ruta de potencia
+      device_id:
+        name: Id de dispositivo
+      shelly_model:
+        name: Modelo Shelly
+      uuid:
+        name: UUID
+      sensor_id:
+        name: Id de sensor
+      alias:
+        name: Alias
+      label:
+        name: Etiqueta
+  emulators:
+    name: Salidas experto
+    description: "Igual que Salidas, más id de producto y puertos UDP. Si hay una fila aquí, se ignora Salidas."
+    fields:
+      id:
+        name: Nombre
+      type:
+        name: La batería ve
+      source:
+        name: Id de fuente
+      enabled:
+        name: Activo
+      mac:
+        name: MAC
+      serial:
+        name: Serie
+      productid:
+        name: ID de producto
+      hostname:
+        name: Hostname
+      udp_ports:
+        name: Puertos UDP
+        description: "Lista separada por comas, u off. EM Gen3: 1010,2220. Pro EM-50: 2223."
+network:
+  80/tcp: HTTP para EcoTracker, Shelly y Sparky

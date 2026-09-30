@@ -1,0 +1,354 @@
+configuration:
+  source_url:
+    name: EcoTracker address
+    description: "Simple setup: IP or URL of a physical EcoTracker, without /v1/json. Leave unused when you add a meter card below."
+  idle_fetch_seconds:
+    name: Idle fetch
+    description: "Fetch on its own after this many seconds without a battery request. 0 = off. Default 5."
+  log_level:
+    name: Log level
+    description: info = quiet, debug = every request
+  mqtt_enabled:
+    name: MQTT sensors
+    description: Publish sensors via Home Assistant MQTT discovery (needs Mosquitto)
+  mqtt_host:
+    name: MQTT host
+    description: Usually core-mosquitto
+  mqtt_port:
+    name: MQTT port
+    description: "1883"
+  mqtt_user:
+    name: MQTT user
+    description: Leave empty if the broker allows anonymous login
+  mqtt_password:
+    name: MQTT password
+    description: Optional
+  mqtt_discovery_prefix:
+    name: Discovery prefix
+    description: homeassistant
+  port:
+    name: HTTP port
+    description: Growatt NOAH expects 80
+  mac:
+    name: EcoTracker MAC
+    description: Fixed 12-digit hex for hostname ecotracker-<mac>. Do not change after pairing.
+  serial:
+    name: Serial
+    description: mDNS serial (uni-meter default)
+  productid:
+    name: Product ID
+    description: "1137 = EcoTracker IR"
+  announce_ip:
+    name: Announced IP
+    description: Leave empty for auto-detect. Set only if the Pi has several IPs.
+  shelly_enabled:
+    name: Also offer Shelly Pro 3EM
+    description: "Second virtual meter (HTTP /rpc) with the same values. For Growatt. Off if you add Outputs below."
+  shelly_mac:
+    name: Shelly MAC
+    description: Fixed 12-digit hex for hostname shellypro3em-<mac>. Do not change after pairing.
+  tibber:
+    name: Tibber Pulse
+    description: "Add one row per Pulse. Printed password is required. Source id defaults to tibber_pulse — use that as Output source."
+    fields:
+      id:
+        name: Source id
+        description: Name used by Outputs. Empty = tibber_pulse.
+      host:
+        name: Bridge IP
+        description: Local IP of the Tibber Pulse bridge
+      password:
+        name: Password
+        description: Printed on the bridge
+      user:
+        name: User
+        description: Usually admin
+      node_id:
+        name: Node id
+        description: Usually 1
+      label:
+        name: Label
+        description: Shown on the status page
+  homewizard:
+    name: HomeWizard
+    description: "Local P1 meter. No token = API v1. Token = API v2 (HTTPS)."
+    fields:
+      id:
+        name: Source id
+        description: Empty = homewizard
+      host:
+        name: Meter IP
+      token:
+        name: API v2 token
+        description: Leave empty for local API v1
+      label:
+        name: Label
+  sma:
+    name: SMA Energy Meter
+    description: "Speedwire multicast. The add-on already uses host network. Empty row is enough if one meter is on the LAN."
+    fields:
+      id:
+        name: Source id
+        description: Empty = sma
+      serial_number:
+        name: Serial
+        description: Optional filter
+      udp_port:
+        name: UDP port
+        description: Default 9522
+      multicast_group:
+        name: Multicast group
+        description: Default 239.12.255.254
+      label:
+        name: Label
+  fronius:
+    name: Fronius
+    description: Solar API meter (GetMeterRealtimeData).
+    fields:
+      id:
+        name: Source id
+        description: Empty = fronius
+      host:
+        name: Inverter IP
+      device_id:
+        name: Device id
+        description: Usually 0
+      per_phase:
+        name: Per phase
+        description: Read L1/L2/L3 instead of the sum only
+      label:
+        name: Label
+  tasmota:
+    name: Tasmota
+    description: Reads status 10 / ENERGY. Default power field is Power.
+    fields:
+      id:
+        name: Source id
+        description: Empty = tasmota
+      host:
+        name: Device IP
+      user:
+        name: User
+        description: Only if the web UI has a password
+      password:
+        name: Password
+      json_power:
+        name: Power fields
+        description: "Comma list for phases, e.g. Power_1,Power_2,Power_3"
+      json_prefix:
+        name: JSON prefix
+        description: Default ENERGY
+      label:
+        name: Label
+  shelly_source:
+    name: Physical Shelly
+    description: "Read a real Shelly (not the virtual one below). Model 3empro is the default."
+    fields:
+      id:
+        name: Source id
+        description: Empty = shelly
+      host:
+        name: Shelly IP
+      shelly_model:
+        name: Model
+      user:
+        name: User
+      password:
+        name: Password
+      meter_index:
+        name: Meter index
+        description: Only for older 1PM / EM with several channels
+      label:
+        name: Label
+  http_json:
+    name: HTTP JSON
+    description: Any meter that returns JSON. Power path uses dots, e.g. emeters.0.power.
+    fields:
+      id:
+        name: Source id
+        description: Empty = http_json
+      url:
+        name: URL
+        description: Full URL including path
+      json_power:
+        name: Power path
+        description: Default power
+      json_power_l1:
+        name: Phase 1 path
+      json_power_l2:
+        name: Phase 2 path
+      json_power_l3:
+        name: Phase 3 path
+      json_energy_in:
+        name: Import energy path
+        description: Watt-hours
+      json_energy_out:
+        name: Export energy path
+      label:
+        name: Label
+  mqtt_source:
+    name: MQTT meter
+    description: Last message on a topic. A plain number, or JSON if Power path is set.
+    fields:
+      id:
+        name: Source id
+        description: Empty = mqtt
+      mqtt_topic:
+        name: Topic
+      mqtt_host:
+        name: Broker
+        description: Empty = same as MQTT host above
+      mqtt_port:
+        name: Port
+      mqtt_user:
+        name: User
+      mqtt_password:
+        name: Password
+      json_power:
+        name: Power path
+        description: Empty if the payload is a number
+      label:
+        name: Label
+  ha_source:
+    name: Home Assistant entity
+    description: Reads an entity from this Home Assistant. Token is filled in automatically for the add-on.
+    fields:
+      id:
+        name: Source id
+        description: Empty = homeassistant
+      ha_power_entity:
+        name: Power entity
+        description: e.g. sensor.grid_power
+      ha_power_l1_entity:
+        name: Phase 1 entity
+      ha_power_l2_entity:
+        name: Phase 2 entity
+      ha_power_l3_entity:
+        name: Phase 3 entity
+      ha_energy_in_entity:
+        name: Import entity
+      ha_energy_out_entity:
+        name: Export entity
+      ha_url:
+        name: HA URL
+        description: Leave empty inside the add-on
+      ha_token:
+        name: Token
+        description: Leave empty inside the add-on
+      label:
+        name: Label
+  other_meters:
+    name: Other meters
+    description: "AMIS, VZLogger, ESPHome, Refoss, ioBroker, Enphase Envoy, SHRDZM. Fill only the fields that meter needs."
+    fields:
+      id:
+        name: Source id
+        description: Empty = meter type
+      meter:
+        name: Meter
+      host:
+        name: Host or IP
+      uuid:
+        name: VZLogger UUID
+        description: Comma = phases
+      sensor_id:
+        name: ESPHome sensor id
+      alias:
+        name: ioBroker state
+      token:
+        name: Envoy token
+      user:
+        name: User
+      password:
+        name: Password
+      channels:
+        name: Refoss channels
+        description: e.g. 1,2,3
+      port:
+        name: Port
+        description: Only if not the default
+      label:
+        name: Label
+  outputs:
+    name: Outputs
+    description: "Virtual meters for the battery. Empty = EcoTracker (and Shelly if enabled) from the first meter. Source id must match a card above. Restart after changes."
+    fields:
+      id:
+        name: Name
+      type:
+        name: Battery sees
+      source:
+        name: Source id
+        description: Empty = first meter
+      mac:
+        name: MAC
+        description: 12 hex digits. Do not change after pairing.
+      serial:
+        name: Serial
+        description: EcoTracker or Sparky
+      hostname:
+        name: Hostname
+        description: Empty = built from type and MAC
+      enabled:
+        name: Enabled
+  sources:
+    name: Expert sources
+    description: "YAML only if a card is missing a field. If this list has a row, the meter cards above are ignored."
+    fields:
+      id:
+        name: Source id
+      type:
+        name: Type
+      url:
+        name: URL
+      host:
+        name: Host
+      password:
+        name: Password
+      token:
+        name: Token
+      user:
+        name: User
+      mqtt_topic:
+        name: MQTT topic
+      ha_power_entity:
+        name: HA entity
+      json_power:
+        name: Power path
+      device_id:
+        name: Device id
+      shelly_model:
+        name: Shelly model
+      uuid:
+        name: UUID
+      sensor_id:
+        name: Sensor id
+      alias:
+        name: Alias
+      label:
+        name: Label
+  emulators:
+    name: Expert outputs
+    description: "Same as Outputs, plus product id and UDP ports. If this list has a row, Outputs is ignored."
+    fields:
+      id:
+        name: Name
+      type:
+        name: Battery sees
+      source:
+        name: Source id
+      enabled:
+        name: Enabled
+      mac:
+        name: MAC
+      serial:
+        name: Serial
+      productid:
+        name: Product ID
+      hostname:
+        name: Hostname
+      udp_ports:
+        name: UDP ports
+        description: "Comma list, or off. EM Gen3 default 1010,2220. Pro EM-50 default 2223."
+network:
+  80/tcp: HTTP for EcoTracker, Shelly and Sparky

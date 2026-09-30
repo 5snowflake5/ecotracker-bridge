@@ -1,10 +1,11 @@
-name: EcoTracker Bridge
+name: Meter Bridge
 version: "1.3.2"
 slug: ecotracker_bridge
 description: >-
-  Liest einen physischen everHome EcoTracker und gibt ihn als virtuellen
-  EcoTracker (HTTP /v1/json + mDNS _everhome._tcp) und optional als Shelly
-  Pro 3EM (/rpc + mDNS _shelly._tcp) aus – für Growatt NOAH und HA-Sensoren.
+  Hub für Smart Meter: liest viele Quellen (EcoTracker, Shelly, Tasmota, HomeWizard,
+  SMA, Fronius, Tibber Pulse, MQTT, Home Assistant, …) und stellt virtuelle Zähler
+  bereit (EcoTracker, Shelly Pro 3EM / EM Gen3 / Pro EM-50, Chargee Sparky) – auch
+  mehrere gleichzeitig.
 url: https://github.com/fromWaterToWind/ecotracker-bridge
 arch:
   - aarch64
@@ -17,6 +18,7 @@ boot: auto
 host_network: true
 services:
   - mqtt:want
+homeassistant_api: true
 options:
   source_url: "http://192.168.55.140"
   idle_fetch_seconds: 5
@@ -34,6 +36,19 @@ options:
   announce_ip: ""
   shelly_enabled: true
   shelly_mac: "C8C9A3B43A45"
+  tibber: []
+  homewizard: []
+  sma: []
+  fronius: []
+  tasmota: []
+  shelly_source: []
+  http_json: []
+  mqtt_source: []
+  ha_source: []
+  other_meters: []
+  outputs: []
+  sources: []
+  emulators: []
 schema:
   source_url: str
   idle_fetch_seconds: int(0,60)
@@ -51,3 +66,121 @@ schema:
   announce_ip: str
   shelly_enabled: bool
   shelly_mac: str
+  tibber:
+    - id: str?
+      host: str
+      password: password
+      user: str?
+      node_id: str?
+      label: str?
+  homewizard:
+    - id: str?
+      host: str
+      token: password?
+      label: str?
+  sma:
+    - id: str?
+      serial_number: str?
+      udp_port: port?
+      multicast_group: str?
+      label: str?
+  fronius:
+    - id: str?
+      host: str
+      device_id: str?
+      per_phase: bool?
+      label: str?
+  tasmota:
+    - id: str?
+      host: str
+      user: str?
+      password: password?
+      json_power: str?
+      json_prefix: str?
+      label: str?
+  shelly_source:
+    - id: str?
+      host: str
+      shelly_model: list(3empro|3em|1pm|plus1pm)?
+      user: str?
+      password: password?
+      meter_index: str?
+      label: str?
+  http_json:
+    - id: str?
+      url: str
+      json_power: str?
+      json_power_l1: str?
+      json_power_l2: str?
+      json_power_l3: str?
+      json_energy_in: str?
+      json_energy_out: str?
+      label: str?
+  mqtt_source:
+    - id: str?
+      mqtt_topic: str
+      mqtt_host: str?
+      mqtt_port: port?
+      mqtt_user: str?
+      mqtt_password: password?
+      json_power: str?
+      label: str?
+  ha_source:
+    - id: str?
+      ha_power_entity: str
+      ha_power_l1_entity: str?
+      ha_power_l2_entity: str?
+      ha_power_l3_entity: str?
+      ha_energy_in_entity: str?
+      ha_energy_out_entity: str?
+      ha_url: str?
+      ha_token: password?
+      label: str?
+  other_meters:
+    - id: str?
+      meter: list(amis_reader|vzlogger|esphome|refoss|iobroker|envoy|shrdzm)
+      host: str
+      uuid: str?
+      sensor_id: str?
+      alias: str?
+      token: password?
+      user: str?
+      password: password?
+      channels: str?
+      port: port?
+      label: str?
+  outputs:
+    - id: str?
+      type: list(ecotracker|shelly_pro3em|shelly_emg3|shelly_proem50|chargee_sparky)
+      source: str?
+      mac: str?
+      serial: str?
+      hostname: str?
+      enabled: bool?
+  sources:
+    - id: str
+      type: list(ecotracker|http_json|mqtt|homeassistant|tasmota|homewizard|fronius|tibber_pulse|shelly|sma|amis_reader|vzlogger|esphome|refoss|iobroker|envoy|shrdzm)
+      url: str?
+      host: str?
+      password: password?
+      token: password?
+      user: str?
+      mqtt_topic: str?
+      ha_power_entity: str?
+      json_power: str?
+      device_id: str?
+      shelly_model: str?
+      uuid: str?
+      sensor_id: str?
+      alias: str?
+      label: str?
+  emulators:
+    - id: str
+      type: list(ecotracker|shelly_pro3em|shelly_emg3|shelly_proem50|chargee_sparky)
+      source: str
+      enabled: bool?
+      mac: str?
+      serial: str?
+      productid: str?
+      hostname: str?
+      udp_ports: str?
