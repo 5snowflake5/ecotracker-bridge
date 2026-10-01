@@ -54,5 +54,5 @@ jobs:
           push: true
           provenance: false
           tags: |
-            ghcr.io/fromWaterToWind/${{ matrix.arch }}-addon-ecotracker_bridge:${{ steps.ver.outputs.tag }}
-            ghcr.io/fromWaterToWind/${{ matrix.arch }}-addon-ecotracker_bridge:${{ steps.ver.outputs.sha_tag }}
+            ghcr.io/fromwatertowind/${{ matrix.arch }}-addon-ecotracker_bridge:${{ steps.ver.outputs.tag }}
+            ghcr.io/fromwatertowind/${{ matrix.arch }}-addon-ecotracker_bridge:${{ steps.ver.outputs.sha_tag }}

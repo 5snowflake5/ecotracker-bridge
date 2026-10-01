@@ -11,7 +11,7 @@ arch:
   - aarch64
   - amd64
 # Vorgebaute Images – kein lokaler Docker-Build auf dem Pi (OOM/Supervisor-Crash).
-image: "ghcr.io/fromWaterToWind/{arch}-addon-ecotracker_bridge"
+image: "ghcr.io/fromwatertowind/{arch}-addon-ecotracker_bridge"
 init: false
 startup: services
 boot: auto
