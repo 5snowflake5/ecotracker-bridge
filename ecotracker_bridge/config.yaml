@@ -1,5 +1,5 @@
 name: Meter Bridge
-version: "1.4.0"
+version: "1.4.1"
 slug: ecotracker_bridge
 description: >-
   Hub für Smart Meter: liest viele Quellen (EcoTracker, Shelly, Tasmota, HomeWizard,

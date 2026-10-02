@@ -7,7 +7,7 @@ import socket
 import sys
 from datetime import datetime, timedelta, timezone
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 BERLIN = timezone(timedelta(hours=2))
 OPTIONS_PATHS = ("/data/options.json", "options.json")
