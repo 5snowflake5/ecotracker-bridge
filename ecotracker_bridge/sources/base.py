@@ -24,6 +24,7 @@ class PollingSource(Source):
         self.label = str(cfg.get("label") or self.id)
         self.min_refetch_s = float(cfg.get("min_refetch_s") or self.min_refetch_s)
         self._lock = threading.Lock()
+        self._fetch_lock = threading.Lock()
         self._last: Reading | None = None
         self._last_ok: datetime | None = None
         self._last_fetch_mono = 0.0
@@ -53,24 +54,33 @@ class PollingSource(Source):
 
     def read(self, *, reason: str = "", force: bool = False) -> Reading | None:
         now = time.monotonic()
-        if not force:
-            with self._lock:
-                last = self._last
-                last_mono = self._last_fetch_mono
-            if last is not None and last_mono > 0:
-                age = now - last_mono
-                if age < self.min_refetch_s:
-                    LOG.debug(
-                        "Quelle %s übersprungen (%s): Cache %.1f s alt (< %.1f s)",
-                        self.id,
-                        reason,
-                        age,
-                        self.min_refetch_s,
-                    )
-                    return last
+        with self._lock:
+            last = self._last
+            last_mono = self._last_fetch_mono
+        if not force and last is not None and last_mono > 0:
+            age = now - last_mono
+            if age < self.min_refetch_s:
+                LOG.debug(
+                    "Quelle %s übersprungen (%s): Cache %.1f s alt (< %.1f s)",
+                    self.id,
+                    reason,
+                    age,
+                    self.min_refetch_s,
+                )
+                return last
+        if not self._fetch_lock.acquire(blocking=False):
+            return last
+        try:
+            return self._do_fetch(reason)
+        finally:
+            self._fetch_lock.release()
+
+    def _do_fetch(self, reason: str) -> Reading | None:
         try:
             reading = self.fetch()
         except Exception as exc:
+            with self._lock:
+                self._last_fetch_mono = time.monotonic()
             return self._on_error(exc, reason)
         reading.source_id = self.id
         with self._lock:

@@ -147,7 +147,7 @@ class MqttHaPublisher:
             if client is None or not self.enabled:
                 return
             state_topic, avail_topic, obj_prefix = _mqtt_topics(source_id)
-            device_name = "Meter Bridge" if source_id in _LEGACY_SOURCE_IDS else f"Meter Bridge ({source_id})"
+            device_name = "Ecotracker" if source_id in _LEGACY_SOURCE_IDS else f"Meter Bridge ({source_id})"
             device_id = "ecotracker_bridge" if source_id in _LEGACY_SOURCE_IDS else f"ecotracker_bridge_{source_id}"
             device = {
                 "identifiers": [device_id],

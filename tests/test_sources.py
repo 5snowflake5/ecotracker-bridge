@@ -4,6 +4,39 @@ from unittest.mock import MagicMock, patch
 from model import Reading, reading_from_ecotracker
 from sources.ecotracker import EcoTrackerSource, normalize_ecotracker_url
 from sources.http_json import HttpJsonSource
+from sources.base import PollingSource
+
+
+class _SlowSource(PollingSource):
+    type = "slow"
+
+    def __init__(self) -> None:
+        super().__init__({"id": "slow"})
+        self.calls = 0
+        self._enter = __import__("threading").Event()
+        self._release = __import__("threading").Event()
+
+    def fetch(self):
+        self.calls += 1
+        self._enter.set()
+        self._release.wait(timeout=2)
+        return Reading(power_w=1.0, source_id=self.id)
+
+
+def test_read_single_flight_returns_cache():
+    src = _SlowSource()
+    src._last = Reading(power_w=9.0, source_id="slow")
+    src._last_fetch_mono = 0.0
+    t = __import__("threading").Thread(target=lambda: src.read(reason="first"))
+    t.start()
+    assert src._enter.wait(timeout=1)
+    cached = src.read(reason="second")
+    assert cached is not None
+    assert cached.power_w == 9.0
+    src._release.set()
+    t.join(timeout=2)
+    assert src.calls == 1
+
 
 
 def test_reading_from_ecotracker_roundtrip():

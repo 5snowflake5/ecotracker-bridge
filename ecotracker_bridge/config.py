@@ -49,6 +49,61 @@ def _clean_entry(entry: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in entry.items() if value not in (None, "")}
 
 
+_SOURCE_REQUIRED: dict[str, tuple[str, ...]] = {
+    "ecotracker": ("url", "host", "ip"),
+    "http_json": ("url",),
+    "mqtt": ("mqtt_topic",),
+    "homeassistant": ("ha_power_entity", "ha_power_l1_entity"),
+    "tasmota": ("host", "url", "ip"),
+    "homewizard": ("host", "url", "ip"),
+    "fronius": ("host", "url", "ip"),
+    "tibber_pulse": ("host", "url", "ip", "password"),
+    "shelly": ("host", "url", "ip"),
+    "sma": ("id", "serial_number", "serial", "label"),
+    "amis_reader": ("host", "url", "ip"),
+    "vzlogger": ("host", "ip", "uuid"),
+    "esphome": ("host", "ip", "sensor_id"),
+    "refoss": ("host", "url", "ip"),
+    "iobroker": ("host", "ip", "alias"),
+    "envoy": ("host", "url", "ip"),
+    "shrdzm": ("host", "url", "ip"),
+}
+
+
+def _has_any(item: dict[str, Any], keys: tuple[str, ...]) -> bool:
+    return any(str(item.get(key) or "").strip() for key in keys)
+
+
+def _source_row_complete(item: dict[str, Any]) -> bool:
+    kind = str(item.get("type") or "").strip().lower()
+    if not kind:
+        return False
+    needed = _SOURCE_REQUIRED.get(kind)
+    if not needed:
+        return bool(item.get("host") or item.get("url") or item.get("ip"))
+    if kind == "tibber_pulse":
+        return _has_any(item, ("host", "url", "ip")) and bool(item.get("password"))
+    if kind == "sma":
+        return True
+    return _has_any(item, needed)
+
+
+def _emulator_row_complete(item: dict[str, Any]) -> bool:
+    kind = str(item.get("type") or "").strip().lower().replace("-", "_")
+    return kind in (
+        "ecotracker",
+        "shelly_pro3em",
+        "shellypro3em",
+        "shelly_emg3",
+        "shellyemg3",
+        "shelly_proem50",
+        "shellyproem50",
+        "chargee_sparky",
+        "sparky",
+        "chargee",
+    )
+
+
 _FORM_SOURCE_TYPES: tuple[tuple[str, str], ...] = (
     ("tibber", "tibber_pulse"),
     ("homewizard", "homewizard"),
@@ -63,13 +118,7 @@ _FORM_SOURCE_TYPES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _migrate_sources(opts: dict[str, Any], idle: float) -> list[dict[str, Any]]:
-    raw = opts.get("sources")
-    if isinstance(raw, list) and len(raw) > 0:
-        return [_clean_entry(entry) for entry in raw if isinstance(entry, dict)]
-    extra = _extra_sources(opts)
-    if extra:
-        return extra
+def _legacy_grid_source(opts: dict[str, Any], idle: float) -> list[dict[str, Any]]:
     source_url = str(opts.get("source_url") or "").strip()
     if not source_url:
         raise SystemExit("source_url fehlt (oder sources-Liste / Zähler-Karten angeben)")
@@ -81,6 +130,36 @@ def _migrate_sources(opts: dict[str, Any], idle: float) -> list[dict[str, Any]]:
             "idle_fetch_seconds": idle,
         }
     ]
+
+
+def _fill_ecotracker_url(item: dict[str, Any], opts: dict[str, Any]) -> dict[str, Any]:
+    if str(item.get("type") or "").lower() != "ecotracker":
+        return item
+    if item.get("url") or item.get("host") or item.get("ip"):
+        return item
+    source_url = str(opts.get("source_url") or "").strip()
+    if source_url:
+        item = dict(item)
+        item["url"] = source_url
+    return item
+
+
+def _migrate_sources(opts: dict[str, Any], idle: float) -> list[dict[str, Any]]:
+    raw = opts.get("sources")
+    if isinstance(raw, list):
+        entries: list[dict[str, Any]] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            item = _fill_ecotracker_url(_clean_entry(entry), opts)
+            if _source_row_complete(item):
+                entries.append(item)
+        if entries:
+            return entries
+    extra = _extra_sources(opts)
+    if extra:
+        return extra
+    return _legacy_grid_source(opts, idle)
 
 
 def _other_meter_type(entry: dict[str, Any]) -> str:
@@ -101,6 +180,8 @@ def _extra_sources(opts: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(entry, dict):
                 continue
             item = _clean_entry(entry)
+            if not item:
+                continue
             if key == "other_meters":
                 item.pop("meter", None)
                 item["type"] = _other_meter_type(entry)
@@ -108,14 +189,23 @@ def _extra_sources(opts: dict[str, Any]) -> list[dict[str, Any]]:
                 item["type"] = kind
             if not str(item.get("id") or "").strip():
                 item["id"] = str(item.get("type") or kind)
+            if not _source_row_complete(item):
+                LOG.warning("Zähler-Karte %s ignoriert (unvollständig)", key)
+                continue
             out.append(item)
     return out
 
 
 def _migrate_emulators(opts: dict[str, Any], sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     raw = opts.get("emulators")
-    if isinstance(raw, list) and len(raw) > 0:
-        return [_clean_entry(entry) for entry in raw if isinstance(entry, dict)]
+    if isinstance(raw, list):
+        entries = [
+            item
+            for item in (_clean_entry(entry) for entry in raw if isinstance(entry, dict))
+            if _emulator_row_complete(item)
+        ]
+        if entries:
+            return entries
     extra = _extra_emulators(opts)
     if extra:
         return extra
@@ -154,6 +244,8 @@ def _extra_emulators(opts: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(entry, dict):
                 continue
             item = _clean_entry(entry)
+            if not _emulator_row_complete(item):
+                continue
             if not str(item.get("id") or "").strip():
                 item["id"] = str(item.get("type") or "output")
             out.append(item)

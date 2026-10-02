@@ -123,7 +123,46 @@ def test_expert_sources_ignore_form_cards(monkeypatch, tmp_path):
     assert cfg.emulators[0]["id"] == "emu1"
 
 
+def test_placeholder_lists_keep_legacy(monkeypatch, tmp_path):
+    opts = {
+        "source_url": "http://192.168.1.77",
+        "shelly_enabled": True,
+        "mac": "AABBCCDDEEFF",
+        "shelly_mac": "112233445566",
+        "sources": [{}],
+        "emulators": [{"id": ""}],
+        "tibber": [{"host": "", "password": ""}],
+        "outputs": [{}],
+        "announce_ip": "127.0.0.1",
+    }
+    path = tmp_path / "options.json"
+    path.write_text(__import__("json").dumps(opts), encoding="utf-8")
+    monkeypatch.setattr("config.OPTIONS_PATHS", (str(path),))
+
+    cfg = load_config()
+    assert cfg.sources[0]["url"] == "http://192.168.1.77"
+    assert cfg.sources[0]["type"] == "ecotracker"
+    assert [e["type"] for e in cfg.emulators] == ["ecotracker", "shelly_pro3em"]
+    assert cfg.emulators[0]["mac"] == "AABBCCDDEEFF"
+    assert cfg.emulators[1]["mac"] == "112233445566"
+
+
 def test_sources_without_emulators_uses_first_source_id(monkeypatch, tmp_path):
+    opts = {
+        "source_url": "http://ignored",
+        "sources": [
+            {"id": "pv", "type": "http_json", "url": "http://inverter/api"},
+        ],
+        "emulators": [],
+        "announce_ip": "127.0.0.1",
+    }
+    path = tmp_path / "options.json"
+    path.write_text(__import__("json").dumps(opts), encoding="utf-8")
+    monkeypatch.setattr("config.OPTIONS_PATHS", (str(path),))
+
+    cfg = load_config()
+    assert cfg.emulators[0]["source"] == "pv"
+    assert cfg.emulators[0]["type"] == "ecotracker"
     opts = {
         "source_url": "http://ignored",
         "sources": [

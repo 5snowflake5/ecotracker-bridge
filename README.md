@@ -54,7 +54,7 @@ Kein HACS nötig. Voraussetzung: **Mosquitto**-App + MQTT-Integration in HA.
 2. In der Bridge-Config: `mqtt_enabled: true`, Host `core-mosquitto`
 3. User/Pass nur setzen, wenn dein Mosquitto das verlangt
 4. Bridge starten → im Log: `MQTT verbunden` und `MQTT HA-Discovery veröffentlicht`
-5. Unter **Einstellungen → Geräte & Dienste** erscheint Gerät **Meter Bridge** mit Sensoren
+5. Unter **Einstellungen → Geräte & Dienste** erscheint Gerät **Ecotracker** mit Sensoren
 
 Die Werte kommen aus denselben Abrufen wie NOAH (kein Extra-Poll auf die Hardware).
 
