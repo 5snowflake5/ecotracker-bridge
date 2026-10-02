@@ -23,6 +23,23 @@ class _SlowSource(PollingSource):
         return Reading(power_w=1.0, source_id=self.id)
 
 
+def test_error_backoff_skips_retry():
+    class Boom(PollingSource):
+        type = "boom"
+
+        def fetch(self):
+            raise TimeoutError("timed out")
+
+    src = Boom({"id": "boom", "error_retry_s": 30})
+    src._last = Reading(power_w=4.0, source_id="boom")
+    first = src.read(reason="fail")
+    assert first is not None and first.power_w == 4.0
+    assert src._polls_fail == 1
+    second = src.read(reason="too-soon")
+    assert second is not None and second.power_w == 4.0
+    assert src._polls_fail == 1
+
+
 def test_read_single_flight_returns_cache():
     src = _SlowSource()
     src._last = Reading(power_w=9.0, source_id="slow")

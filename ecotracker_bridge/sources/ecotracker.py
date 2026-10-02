@@ -15,7 +15,7 @@ LOG = logging.getLogger("ecotracker-bridge")
 
 _VERSION = "1.3.2"
 _FETCH_HEADERS = {"Accept": "application/json", "User-Agent": f"ecotracker-bridge/{_VERSION}"}
-_DEFAULT_TIMEOUT_S = 4.0
+_DEFAULT_TIMEOUT_S = 10.0
 _BERLIN = timezone(timedelta(hours=2))
 
 
